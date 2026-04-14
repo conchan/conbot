@@ -459,7 +459,7 @@ docker compose up -d
 Open WebUI is now accessible at `http://192.168.1.101:3000`. The first account you create is the admin.
 
 ### Step 4 — Pull your AI models
-> **Script available:** `scripts/06-pull-models.sh` — pulls both models by default. Run it inside CT 101's shell.
+> **Script available:** `scripts/04-pull-models.sh` — pulls both models by default. Run it inside CT 101's shell.
 
 Or manually:
 ```bash
@@ -617,7 +617,7 @@ Tailscale creates a private encrypted mesh network. Every device gets a stable `
 2. Note your **tailnet name** from the admin console — e.g., `tail1a2b3c.ts.net`
 
 #### Step 2 — Install Tailscale on the Proxmox host
-> **Script available:** `scripts/04-tailscale-proxmox.sh` — automates Steps 2 and 3 (IP forwarding + install + bring-up).
+> **Script available:** `scripts/05-tailscale-proxmox.sh` — automates Steps 2 and 3 (IP forwarding + install + bring-up).
 
 Run in **Node → Shell**:
 ```bash
@@ -697,7 +697,7 @@ echo 'lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file' >> /etc/p
 Then reboot the container: Proxmox UI → CT 102 → **Reboot**
 
 #### Step 3 — Enable IP forwarding and firewall rules
-> **Script available:** `scripts/05-wireguard-lxc-harden.sh` — automates this entire step. Run it inside CT 102's shell.
+> **Script available:** `scripts/06-wireguard-lxc-harden.sh` — automates this entire step. Run it inside CT 102's shell.
 
 Or manually in CT 102's shell:
 ```bash
@@ -966,8 +966,8 @@ Work through this in order. The sequence follows the [Recommended Setup Order](#
 - [ ] Test: type "turn on the living room lights" in Open WebUI chat
 
 ### Step 9 — Part 8: Remote Access
-- [ ] **Tailscale (recommended):** Run `scripts/04-tailscale-proxmox.sh` → approve subnet route in admin console → install HA add-on → install on iPhone + Mac
-- [ ] OR **WireGuard:** Run community LXC installer → run `scripts/05-wireguard-lxc-harden.sh` → configure WGDashboard → open UDP 51820 in router
+- [ ] **Tailscale (recommended):** Run `scripts/05-tailscale-proxmox.sh` → approve subnet route in admin console → install HA add-on → install on iPhone + Mac
+- [ ] OR **WireGuard:** Run community LXC installer → run `scripts/06-wireguard-lxc-harden.sh` → configure WGDashboard → open UDP 51820 in router
 - [ ] Test remote access: turn off Wi-Fi on iPhone → confirm HA loads
 
 ### Step 10 — Part 9: Siri Passthrough
@@ -1002,7 +1002,7 @@ Allocations can be adjusted in Proxmox at any time without reinstalling anything
 | `scripts/01-proxmox-post-install.sh` | Proxmox Shell | Part 1, Step 5 |
 | `scripts/02-download-ubuntu-template.sh` | Proxmox Shell | Part 4, Step 1 |
 | `scripts/03-setup-ai-stack.sh` | Inside CT 101 shell | Part 4, Steps 3–4 |
-| `scripts/04-tailscale-proxmox.sh` | Proxmox Shell | Part 8, Option A Steps 2–3 |
-| `scripts/05-wireguard-lxc-harden.sh` | Inside WireGuard LXC shell | Part 8, Option B Steps 3–4 |
-| `scripts/06-pull-models.sh` | Inside CT 101 shell | Part 4, Step 4 (model management) |
+| `scripts/04-pull-models.sh` | Inside CT 101 shell | Part 4, Step 4 (model management) |
+| `scripts/05-tailscale-proxmox.sh` | Proxmox Shell | Part 8, Option A Steps 2–3 |
+| `scripts/06-wireguard-lxc-harden.sh` | Inside WireGuard LXC shell | Part 8, Option B Steps 3–4 |
 | `scripts/07-matter-prereq-check.sh` | Proxmox Shell | Part 3.5, pre-flight check |

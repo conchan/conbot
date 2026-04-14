@@ -36,9 +36,10 @@ Automation scripts for setting up a self-hosted Home Assistant + Ollama AI stack
 | [`01-proxmox-post-install.sh`](scripts/01-proxmox-post-install.sh) | Proxmox Shell | Disable enterprise repo, enable free community repo, full upgrade |
 | [`02-download-ubuntu-template.sh`](scripts/02-download-ubuntu-template.sh) | Proxmox Shell | Download Ubuntu 24.04 LXC template for the AI container |
 | [`03-setup-ai-stack.sh`](scripts/03-setup-ai-stack.sh) | Inside AI LXC (CT 101) | Install Docker, deploy Ollama + Open WebUI, pull starter models |
-| [`04-tailscale-proxmox.sh`](scripts/04-tailscale-proxmox.sh) | Proxmox Shell | Install Tailscale, enable subnet routing for home LAN |
-| [`05-wireguard-lxc-harden.sh`](scripts/05-wireguard-lxc-harden.sh) | Inside WireGuard LXC | Enable IP forwarding, set up iptables NAT, persist rules |
-| [`06-pull-models.sh`](scripts/06-pull-models.sh) | Inside AI LXC (CT 101) | Pull or update Ollama models (edit the list inside the script) |
+| [`04-pull-models.sh`](scripts/04-pull-models.sh) | Inside AI LXC (CT 101) | Pull or update Ollama models (edit the list inside the script) |
+| [`05-tailscale-proxmox.sh`](scripts/05-tailscale-proxmox.sh) | Proxmox Shell | Install Tailscale, enable subnet routing for home LAN |
+| [`06-wireguard-lxc-harden.sh`](scripts/06-wireguard-lxc-harden.sh) | Inside WireGuard LXC | Enable IP forwarding, set up iptables NAT, persist rules |
+| [`07-matter-prereq-check.sh`](scripts/07-matter-prereq-check.sh) | Proxmox Shell | IPv6 / multicast / HA reachability preflight before Matter setup |
 
 ## Usage
 
@@ -61,14 +62,17 @@ bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-se
 # 3. Inside CT 101 Shell — set up Docker + Ollama + Open WebUI:
 bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/03-setup-ai-stack.sh)
 
-# 4a. In Proxmox Shell — set up Tailscale VPN (recommended):
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/04-tailscale-proxmox.sh)
+# 4. Later — pull or update Ollama models as needed:
+bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/04-pull-models.sh)
 
-# 4b. Inside WireGuard LXC Shell — harden WireGuard (alternative to Tailscale):
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/05-wireguard-lxc-harden.sh)
+# 5a. In Proxmox Shell — set up Tailscale VPN (recommended):
+bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/05-tailscale-proxmox.sh)
 
-# Later — pull more models as needed:
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/06-pull-models.sh)
+# 5b. Inside WireGuard LXC Shell — harden WireGuard (alternative to Tailscale):
+bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/06-wireguard-lxc-harden.sh)
+
+# 7. In Proxmox Shell — run Matter/Thread preflight check before Part 3.5:
+bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/07-matter-prereq-check.sh)
 ```
 
 Replace `YOUR_USERNAME` with your GitHub username after pushing this repo.
