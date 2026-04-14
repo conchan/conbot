@@ -1,62 +1,796 @@
-# Setup Order & Script Reference
+# Complete Setup Order & Reference
 
-Follow these steps in order. Each script maps to a phase in the main guide.
+> **What this builds:** A private, fully local smart home brain and AI model server running 24/7 on the Minisforum AI X1 Pro-370 — replacing Home Assistant Yellow, replacing Alexa, and running open-source AI models entirely on your network.
 
-## Phase 1 — Proxmox Host (manual + script)
+---
 
-| Step | What | Where to run |
-|------|------|--------------|
-| Manual | Flash Proxmox USB, install on NVMe, set static IP | Physical machine |
-| **Script** | `scripts/01-proxmox-post-install.sh` | Proxmox Shell |
-| Reboot | `reboot` or Proxmox UI → Node → Reboot | Proxmox Shell |
+## Architecture
 
-## Phase 2 — Home Assistant OS VM (mostly automated by community script)
+```
+┌─────────────────────────────────────────────────────────┐
+│              Minisforum AI X1 Pro-370 (bare metal)       │
+│                    Proxmox VE 9.x                        │
+│  ┌──────────────────────┐  ┌──────────────────────────┐ │
+│  │   VM 100: HAOS       │  │  LXC 101: Ubuntu 24.04   │ │
+│  │   Home Assistant OS  │  │  Ollama + Open WebUI     │ │
+│  │   4 vCPU / 8 GB RAM  │  │  10–12 vCPU / 48 GB RAM │ │
+│  │   64 GB disk         │  │  200 GB disk             │ │
+│  └──────────────────────┘  └──────────────────────────┘ │
+│       USB passthrough: Sonoff Zigbee dongle              │
+└─────────────────────────────────────────────────────────┘
+```
 
-| Step | What | Where to run |
-|------|------|--------------|
-| Run HAOS installer | `bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/vm/haos-vm.sh)"` | Proxmox Shell |
-| Configure | RAM: 8192, CPU: 4, Disk: 64 GB | Proxmox wizard |
-| Restore backup | HA web UI → Restore from backup | Browser |
-| Assign static IP | Router admin → DHCP reservation for `homeassistant` | Router |
+## IP Address Plan
 
-## Phase 3 — AI Stack LXC
+| Service | Default IP | Port |
+|---------|-----------|------|
+| Proxmox management | `192.168.1.10` | `8006` |
+| Home Assistant | `192.168.1.100` | `8123` |
+| Ollama API | `192.168.1.101` | `11434` |
+| Open WebUI | `192.168.1.101` | `3000` |
+| WireGuard VPN LXC (if used) | `192.168.1.102` | `51820` UDP |
 
-| Step | What | Where to run |
-|------|------|--------------|
-| **Script** | `scripts/02-download-ubuntu-template.sh` | Proxmox Shell |
-| Manual | Create LXC CT via Proxmox UI (CT 101, 10 cores, 48 GB RAM, 200 GB disk, Nesting enabled) | Proxmox UI |
-| **Script** | `scripts/03-setup-ai-stack.sh` | Inside CT 101 shell |
-| Optional | `scripts/06-pull-models.sh` (add more models later) | Inside CT 101 shell |
+---
 
-## Phase 4 — Remote Access
+## Before You Start
 
-### Option A: Tailscale (recommended)
-| Step | What | Where to run |
-|------|------|--------------|
-| **Script** | `scripts/04-tailscale-proxmox.sh` | Proxmox Shell |
-| Manual | Approve subnet route in Tailscale admin console | Browser |
-| Manual | Install Tailscale add-on in HAOS | HA UI |
-| Optional | `tailscale serve --bg --https=443 http://localhost:3000` | Inside CT 101 shell |
+### Buy these before Day 1
+- **Sonoff Zigbee 3.0 USB Dongle Plus-E** (~$20) — replaces the Yellow's built-in radio
+- **USB flash drive** (8 GB+) — for the Proxmox installer
+- **Ethernet cable** — wire the Minisforum directly to your router
 
-### Option B: WireGuard (self-hosted)
-| Step | What | Where to run |
-|------|------|--------------|
-| Install | `bash -c "$(wget -qLO - https://github.com/community-scripts/ProxmoxVE/raw/main/ct/wireguard.sh)"` | Proxmox Shell |
-| **Script** | `scripts/05-wireguard-lxc-harden.sh` | Inside WireGuard LXC shell |
-| Manual | Add TUN device entries to `/etc/pve/lxc/<CT_ID>.conf` | Proxmox Shell |
-| Manual | Open UDP 51820 in router → port forward to WireGuard LXC IP | Router |
+### Back up HA Yellow first
+Do this before touching anything else. Keep the Yellow running in parallel until the new setup is confirmed stable.
 
-## Phase 5 — Connect Everything
+1. In Home Assistant on your Yellow → **Settings → System → Backups**
+2. **Create Backup** → "Full backup" → wait for it to complete
+3. Click the backup → **Download** → save the `.tar` file to your laptop or cloud storage
+4. Note your **backup encryption key** (Settings → System → Backups → key icon) — you cannot restore without it
 
-All done via UI — no scripts needed:
-- HA → Settings → Integrations → Add → Ollama → URL: `http://192.168.1.101:11434`
-- Install Whisper + Piper + openWakeWord add-ons in HA
-- Create voice pipeline in HA → Voice Assistants
-- Connect Open WebUI to HA via Long-Lived Access Token
+---
 
-## Config Files
+## Part 1 — Install Proxmox on the Minisforum
 
-| File | Purpose |
-|------|---------|
-| `config/docker-compose.yml` | Reference copy of the AI stack compose file |
-| `config/tailscale-acl-example.json` | ACL policy template for Tailscale admin console |
+### Step 1 — Flash the installer USB
+1. Download the **Proxmox VE ISO** from [proxmox.com/downloads](https://www.proxmox.com/en/downloads) (latest stable, currently 9.x)
+2. Flash it using **balenaEtcher** or **Rufus**
+
+### Step 2 — BIOS setup
+1. Plug in USB, monitor, and keyboard; power on the Minisforum
+2. Press **Delete** (or F7) on boot to enter BIOS
+3. Confirm or change these settings:
+   - **Virtualization (AMD-V / SVM):** Enabled (usually on by default)
+   - **Secure Boot:** Disabled ← most common install failure if missed
+   - **Boot order:** USB first
+   - **Power on after AC loss:** Power On ← ensures auto-restart after any power cut
+4. Save and exit
+
+### Step 3 — Install Proxmox (graphical wizard)
+1. Boot from USB → select **"Install Proxmox VE (Graphical)"**
+2. Accept the EULA
+3. **Target disk:** Select the 1 TB NVMe (will be wiped)
+4. **Location/timezone:** Set to your region
+5. **Admin password + email:** Set a strong root password — this is your Proxmox login
+6. **Network config:** Set a static IP, e.g., `192.168.1.10` — gateway and DNS match your router (usually `192.168.1.1`)
+7. Confirm and install (~5–10 minutes)
+8. Remove USB when prompted, let the machine reboot
+
+### Step 4 — Access the Proxmox web UI
+From any device on your network:
+```
+https://192.168.1.10:8006
+```
+You'll get a self-signed cert warning — click through it. Log in with `root` and the password you set.
+
+### Step 5 — Post-install housekeeping
+> **Script available:** `scripts/01-proxmox-post-install.sh` — run this in the Proxmox Shell to automate steps below.
+
+Run in **Node → Shell**:
+```bash
+# Disable the enterprise (paid) repo nag
+sed -i 's/^deb https:\/\/enterprise.proxmox.com\/debian\/pve/#&/' /etc/apt/sources.list.d/pve-enterprise.list
+
+# Enable the free community repo
+echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" \
+  >> /etc/apt/sources.list.d/pve-community.list
+
+# Update and upgrade
+apt-get update && apt-get dist-upgrade -y
+```
+
+Then reboot: **Node → Reboot** in the Proxmox UI (or run `reboot` in the shell).
+
+---
+
+## Part 2 — Install Home Assistant OS as a VM
+
+### Step 1 — Run the HAOS community auto-install script
+In **Node → Shell**:
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/vm/haos-vm.sh)"
+```
+
+When the wizard asks, choose:
+- **Default or Advanced?** → Advanced
+- **HAOS Version:** Stable
+- **VM ID:** Accept default (100)
+- **RAM:** `8192` (8 GB)
+- **CPU cores:** `4`
+- **Disk size:** `64` GB
+- **Machine type:** Default (i440fx)
+- Confirm → script downloads and installs HAOS automatically
+
+### Step 2 — Start the HAOS VM
+1. In the Proxmox left sidebar, find VM 100
+2. Click it → **Start**
+3. Click **Console** to watch it boot (first boot: 2–3 minutes)
+
+### Step 3 — Access Home Assistant
+From any device on your network:
+```
+http://homeassistant.local:8123
+```
+If mDNS doesn't resolve, check your router's DHCP list for a device named `homeassistant` and use its IP directly.
+
+### Step 4 — Restore your HA Yellow backup
+**Do not create a new account.** On the Welcome screen:
+1. Click **"Restore from backup"**
+2. Upload the `.tar` file from your Yellow
+3. Enter your encryption key if prompted
+4. Select **"Full restore"** → Confirm
+5. HA restores and restarts (5–20 minutes depending on setup size)
+6. Log in with your existing Yellow credentials — all devices, automations, dashboards, and add-ons should be restored
+
+### Step 5 — Assign a static IP to Home Assistant
+In your **router's admin panel**, find the new `homeassistant` device in the DHCP list and assign it a static lease, e.g., `192.168.1.100`. This keeps your HA URL stable permanently.
+
+---
+
+## Part 3 — Pass Through the Zigbee USB Dongle
+
+Plug the Sonoff Zigbee dongle into a USB port on the Minisforum.
+
+### Step 1 — Find the dongle's USB ID
+In **Node → Shell**:
+```bash
+lsusb
+```
+Look for a line like:
+```
+Bus 001 Device 003: ID 10c4:ea60 Silicon Labs CP210x UART Bridge
+```
+Note the `ID` value (e.g., `10c4:ea60`).
+
+### Step 2 — Add the USB device to the HAOS VM
+1. In Proxmox, click your HAOS VM → **Hardware** tab → **Add** → **USB Device**
+2. Select **"Use USB Vendor/Device ID"** (not port — this survives unplug/replug)
+3. Select your Sonoff dongle from the list → **Add**
+
+### Step 3 — Restart the HAOS VM
+Proxmox UI → HAOS VM → **Reboot**
+
+### Step 4 — Configure the Zigbee integration in HA
+1. **Settings → Devices & Services**
+2. If ZHA or Zigbee2MQTT doesn't auto-discover, add manually:
+   - ZHA: Settings → Add Integration → "Zigbee Home Automation" → select dongle path (usually `/dev/ttyUSB0` or `/dev/serial/by-id/...`)
+3. Zigbee devices should reconnect within minutes — if any don't reconnect overnight, power-cycle them
+
+> **Thread/Matter note:** The Yellow's built-in Thread radio doesn't transfer to USB. If you use Thread/Matter devices, you'll need a separate Thread border router (e.g., HomePod Mini, Apple TV 4K, or SLZB-06M Ethernet adapter). Most Zigbee setups are unaffected.
+
+---
+
+## Part 4 — Install Ollama + Open WebUI (AI Stack)
+
+This runs in a separate Ubuntu LXC container, isolating AI inference from HAOS.
+
+### Step 1 — Download the Ubuntu 24.04 template
+> **Script available:** `scripts/02-download-ubuntu-template.sh` — automates this step.
+
+In **Node → Shell**:
+```bash
+pveam update
+pveam download local ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+```
+
+### Step 2 — Create the Ubuntu LXC container
+In Proxmox UI → **Datacenter → Node → Create CT**:
+
+| Setting | Value |
+|---------|-------|
+| CT ID | `101` |
+| Hostname | `ai-stack` |
+| Password | Set a strong root password |
+| Template | `ubuntu-24.04-standard_24.04-2_amd64.tar.zst` |
+| Disk | `200 GB` (models are large — one 14B model is ~9–10 GB) |
+| CPU | `10–12 cores` |
+| RAM | `48000 MB` (48 GB) |
+| Network | DHCP |
+| Features tab | Enable **"Nesting"** (required for Docker inside LXC) |
+
+Start the container after creating it.
+
+### Step 3 — Install Docker + deploy the AI stack
+> **Script available:** `scripts/03-setup-ai-stack.sh` — automates Steps 3 and 4 entirely. Run it inside CT 101's shell.
+
+Or manually — access CT 101 → Shell and run:
+
+```bash
+# Update system
+apt update && apt upgrade -y
+apt install -y curl ca-certificates gnupg lsb-release
+
+# Add Docker's official GPG key and repo
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+  > /etc/apt/sources.list.d/docker.list
+
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+systemctl enable docker
+```
+
+Then create and start the stack:
+
+```bash
+mkdir ~/ai-stack && cd ~/ai-stack
+cat > docker-compose.yml << 'EOF'
+services:
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: always
+    ports:
+      - "3000:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - open_webui_data:/app/backend/data
+    depends_on:
+      - ollama
+
+volumes:
+  ollama_data:
+  open_webui_data:
+EOF
+
+docker compose up -d
+```
+
+Open WebUI is now accessible at `http://192.168.1.101:3000`. The first account you create is the admin.
+
+### Step 4 — Pull your first AI models
+> **Script available:** `scripts/06-pull-models.sh` — edit the model list at the top, then run inside CT 101.
+
+Or manually:
+```bash
+# Fast 4B model — great starting point for the voice assistant
+docker exec -it ollama ollama pull qwen3:4b
+
+# More capable 14B model
+docker exec -it ollama ollama pull qwen3:14b
+
+# Test interactively
+docker exec -it ollama ollama run qwen3:4b
+```
+
+**Model reference for your 48 GB container:**
+
+| Model | RAM Used | Speed | Best For |
+|-------|----------|-------|----------|
+| `qwen3:4b` | ~4 GB | Fast | Voice assistant, quick commands |
+| `llama3.1:8b` | ~6 GB | Fast | General Q&A, device control |
+| `qwen3:14b` | ~10 GB | Medium | Complex reasoning, writing |
+| `qwen3:30b-a3b` (MoE) | ~20 GB | Medium | Near-GPT-4 quality, efficient |
+| `llama3.1:70b` (Q4) | ~40 GB | Slow | Maximum capability |
+
+### Step 5 — Assign a static IP to the AI container
+In your **router's admin panel**, assign a static DHCP lease for `ai-stack` (e.g., `192.168.1.101`).
+
+### A note on GPU acceleration (Radeon 890M)
+The Radeon 890M uses `gfx1150`, which as of early 2026 is not fully supported by Ollama's ROCm backend. Ollama defaults to **CPU inference** — still ~15–25 tokens/second for 7B models on this chip, which is perfectly usable for a home voice assistant.
+
+To experiment with GPU acceleration later, add this to the `ollama` service in `docker-compose.yml`:
+```yaml
+environment:
+  - HSA_OVERRIDE_GFX_VERSION=11.0.0
+```
+Results vary. Check [github.com/ollama/ollama/issues/9999](https://github.com/ollama/ollama/issues/9999) for current `gfx1150` status.
+
+---
+
+## Part 5 — Connect Ollama to Home Assistant
+
+### Step 1 — Add the Ollama integration
+1. **Settings → Devices & Services → Add Integration**
+2. Search for **"Ollama"** → select it
+3. Enter the URL: `http://192.168.1.101:11434`
+4. Submit
+
+### Step 2 — Create a conversation agent
+1. Open the Ollama integration card → cogwheel → **Add conversation agent**
+2. Select your model (start with `qwen3:4b` for speed)
+3. Check the **"Assist"** checkbox — this grants the LLM access to your HA entities so it can control devices
+
+### Step 3 — Expose devices to the AI
+1. **Settings → Voice Assistants → Expose**
+2. Toggle on the entities you want the AI to see and control
+3. Start with lights in one room, then expand once confirmed working
+
+### Step 4 — Test
+Press `e` in Home Assistant to open Assist. Switch the conversation agent dropdown to Ollama. Try:
+- *"What's the temperature in the living room?"*
+- *"Turn off all the lights in the kitchen"*
+
+---
+
+## Part 6 — Local Voice Assistant (Alexa Replacement)
+
+This builds a fully offline voice pipeline — no audio leaves your house.
+
+### Step 1 — Install speech add-ons in HAOS
+**Settings → Add-ons → Add-on Store** — install and start all three:
+
+| Add-on | Purpose | Config |
+|--------|---------|--------|
+| **Faster Whisper** | Speech-to-text | Language: `en`, model size: `small` or `medium` |
+| **Piper** | Text-to-speech | Voice: `en_US-lessac-medium` (natural-sounding default) |
+| **openWakeWord** | Wake word detection | Wake word: `hey_jarvis` or `ok_nabu` |
+
+Use Faster Whisper (not standard Whisper) — it's significantly faster on CPU.
+
+### Step 2 — Wyoming integration
+HA will auto-discover the Wyoming protocol services from these add-ons. Go to **Settings → Devices & Services** and click **Add** on any Wyoming notifications that appear.
+
+### Step 3 — Build the voice pipeline
+1. **Settings → Voice Assistants → Add Assistant**
+2. Name it (e.g., "Home AI")
+3. Configure:
+   - **Wake word engine:** openWakeWord
+   - **Wake word:** your chosen phrase
+   - **Speech-to-text:** Faster Whisper
+   - **Conversation agent:** Ollama (`qwen3:4b` for fastest response)
+   - **Text-to-speech:** Piper
+4. Save
+
+### Step 4 — Connect the Home Assistant Voice Preview Edition
+1. Power on the Voice PE box — it discovers your HA instance automatically via its onboarding wizard
+2. In HA → **Settings → Devices & Services** → find the new Voice PE device
+3. Assign it to your "Home AI" pipeline
+4. Say your wake word — LED ring lights up, you speak, response plays through the built-in speaker
+
+You can place multiple Voice Preview boxes in different rooms — each connects to the same pipeline.
+
+---
+
+## Part 7 — Open WebUI ↔ Home Assistant (Two-Way Control)
+
+This lets you type natural language commands to your smart home from the Open WebUI chat interface.
+
+### Step 1 — Generate a Long-Lived Access Token in HA
+1. In HA, click your **profile name** (bottom left) → **Security**
+2. Scroll to **Long-Lived Access Tokens** → **Create Token**
+3. Name it "Open WebUI" → copy and save the token — **it's shown only once**
+
+### Step 2 — Connect in Open WebUI
+1. Open `http://192.168.1.101:3000` → **Workspace → Tools**
+2. Search for the **Home Assistant** community tool (or import it from the community URL)
+3. Configure with:
+   - HA URL: `http://192.168.1.100:8123`
+   - Access token: the token from Step 1
+4. In a new chat, click the tools toggle → enable Home Assistant
+5. You can now type "lock the front door" or "set the living room to 72°F" directly in the chat
+
+---
+
+## Part 8 — Remote Access & VPN
+
+> **Never forward port 8123 (or any service port) directly to the internet.** Use a VPN so devices must authenticate before reaching anything on your home network.
+
+### Tailscale vs. WireGuard
+
+| | Tailscale | Self-hosted WireGuard |
+|--|-----------|----------------------|
+| Setup time | ~10 minutes | ~30–45 minutes |
+| Works behind CGNAT | Yes, automatically | Needs VPS or DDNS workaround |
+| Third-party dependency | Tailscale coordination servers (metadata only — traffic is E2E encrypted) | None — you own everything |
+| Key management | Automatic | Manual |
+| Performance | Slightly more overhead | Near-native WireGuard throughput |
+| Best for | Simplicity, works everywhere | Maximum privacy, zero external trust |
+
+**Recommendation:** Start with Tailscale. Add WireGuard later if privacy requirements evolve.
+
+---
+
+### Option A — Tailscale (Recommended)
+
+Tailscale creates a private encrypted mesh network. Every device gets a stable `100.x.x.x` IP. No ports opened on your router — outbound connections only.
+
+#### Step 1 — Sign up for Tailscale
+1. Create a free account at [tailscale.com](https://tailscale.com) (Google, GitHub, or email)
+2. Note your **tailnet name** from the admin console — e.g., `tail1a2b3c.ts.net`
+
+#### Step 2 — Install Tailscale on the Proxmox host
+> **Script available:** `scripts/04-tailscale-proxmox.sh` — automates Steps 2 and 3 (IP forwarding + install + bring-up).
+
+Run in **Node → Shell**:
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up --advertise-routes=192.168.1.0/24 --accept-dns=false
+```
+This prints an auth URL — open it and log in. The `--advertise-routes` flag exposes your entire home subnet (not just the Minisforum) to Tailscale clients.
+
+In the **Tailscale admin console** at [login.tailscale.com/admin/machines](https://login.tailscale.com/admin/machines):
+- Find your Minisforum node → **...** → **Edit route settings** → approve `192.168.1.0/24`
+  
+  ⚠️ Without this approval, other devices won't see your home network through the VPN.
+
+#### Step 3 — Install Tailscale on Home Assistant
+1. **Settings → Add-ons → Add-on Store** → search "Tailscale"
+2. Install → Start
+3. Open the add-on logs → click the authentication link → log in with the **same Tailscale account**
+
+HA now has its own Tailscale IP and is also reachable via the Proxmox subnet route — two independent paths.
+
+#### Step 4 — Install Tailscale on your client devices
+- **iPhone/iPad:** App Store → Tailscale → log in
+- **Mac:** [tailscale.com/download](https://tailscale.com/download) → install → log in
+
+From anywhere, reach HA at: `http://homeassistant.tail1234.ts.net:8123`
+
+#### Step 5 — Enable HTTPS for Open WebUI
+Required for microphone access in the browser voice UI. Run in CT 101's shell:
+```bash
+tailscale serve --bg --https=443 http://localhost:3000
+```
+Open WebUI is now at `https://ai-stack.tail1234.ts.net` with a valid HTTPS certificate — no Cloudflare or Let's Encrypt needed.
+
+#### Step 6 — Tighten access with Tailscale ACLs
+In the Tailscale admin console → **Access controls**, paste and edit `config/tailscale-acl-example.json` from this repo. Replace `your-email@example.com` with your login email:
+```json
+{
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["your-email@example.com"],
+      "dst": ["homeassistant:8123", "ai-stack:443"]
+    }
+  ]
+}
+```
+This prevents any other device — even one accidentally added to your tailnet — from reaching your services.
+
+---
+
+### Option B — Self-Hosted WireGuard (Maximum Privacy)
+
+No third party involved at any step. Your devices connect directly, with no coordination service.
+
+#### Prerequisites — Dynamic DNS
+WireGuard clients need a stable address to reach your home's public IP (which your ISP may change):
+1. Sign up at [duckdns.org](https://www.duckdns.org) (free) or [no-ip.com](https://www.noip.com)
+2. Create a hostname, e.g., `myhome.duckdns.org`
+3. Install the DuckDNS add-on in Home Assistant (official add-on store) to keep the hostname updated
+
+> **CGNAT check:** If your router's WAN IP starts with `100.64.x.x` or `10.x.x.x`, you're behind Carrier-Grade NAT and cannot receive inbound connections. WireGuard won't work without calling your ISP to request a real public IP, or using a cheap relay VPS (~$5/mo on Hetzner/DigitalOcean). If in doubt, use Tailscale — it handles CGNAT automatically.
+
+#### Step 1 — Create the WireGuard LXC container
+In **Node → Shell**:
+```bash
+bash -c "$(wget -qLO - https://github.com/community-scripts/ProxmoxVE/raw/main/ct/wireguard.sh)"
+```
+Accept defaults — this creates a minimal Debian LXC with WireGuard + WGDashboard installed. Note the container's LAN IP (e.g., `192.168.1.102`).
+
+#### Step 2 — Enable the TUN device in the LXC
+Run in **Node → Shell** (not inside the container):
+```bash
+# Replace 102 with your WireGuard container's actual ID
+echo 'lxc.cgroup2.devices.allow: c 10:200 rwm' >> /etc/pve/lxc/102.conf
+echo 'lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file' >> /etc/pve/lxc/102.conf
+```
+Then reboot the container: Proxmox UI → CT 102 → **Reboot**
+
+#### Step 3 — Enable IP forwarding and firewall rules
+> **Script available:** `scripts/05-wireguard-lxc-harden.sh` — automates this entire step. Run it inside CT 102's shell.
+
+Or manually in CT 102's shell:
+```bash
+# Enable IP forwarding permanently
+echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+sysctl -p
+
+# Allow forwarding and NAT (check your NIC name with: ip link)
+iptables -A FORWARD -i wg0 -j ACCEPT
+iptables -A FORWARD -o wg0 -j ACCEPT
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+
+# Persist rules across reboots
+apt install iptables-persistent -y
+netfilter-persistent save
+```
+
+#### Step 4 — Configure WireGuard via WGDashboard
+1. Open `http://192.168.1.102:10086` in your browser
+2. Default login: `admin` / `admin` — **change this immediately** in Settings
+3. Create a new WireGuard interface:
+   - **Interface name:** `wg0`
+   - **Listen port:** `51820`
+   - **VPN subnet:** `10.10.0.0/24`
+4. Click **Save** → interface starts
+
+#### Step 5 — Open port 51820 on your router
+In your router's admin panel:
+- Port forwarding rule: External **UDP 51820** → Internal `192.168.1.102` port `51820`
+- This is the **only port** you need to open for the entire setup
+
+#### Step 6 — Add client peers in WGDashboard
+For each device (iPhone, MacBook, etc.):
+1. **Add Peer** → give it a name (e.g., "iPhone") → assign a VPN IP (e.g., `10.10.0.2`)
+2. **Allowed IPs:** `192.168.1.0/24, 10.10.0.0/24` — routes all home network traffic through VPN
+3. Click **Generate** → WGDashboard shows a QR code
+4. **iPhone:** Install WireGuard (App Store) → tap **+** → **Scan QR code**
+5. **Mac:** Install WireGuard (App Store or [wireguard.com](https://www.wireguard.com)) → import the `.conf` file
+
+#### Step 7 — Set the DDNS endpoint
+In each generated client config, confirm the `[Peer]` section reads:
+```ini
+Endpoint = myhome.duckdns.org:51820
+```
+Using the DDNS hostname (not a raw IP) means your config never breaks when your ISP changes your IP.
+
+#### Step 8 — Test the VPN
+1. Turn off Wi-Fi on your iPhone (use cellular only)
+2. Connect to the WireGuard VPN → tap the toggle
+3. Navigate to `http://192.168.1.100:8123` — Home Assistant should load
+4. Navigate to `http://192.168.1.101:3000` — Open WebUI should load
+
+---
+
+### Security hardening (applies to both VPN options)
+
+**Proxmox firewall:**
+- Enable the firewall at the datacenter level (Datacenter → Firewall → Enable)
+- Block all inbound traffic to port `8006` from outside your home network — only access Proxmox while on VPN
+
+**Home Assistant:**
+- Keep MFA enabled (Settings → Profile → Security)
+- Use a long randomly generated password stored in a password manager
+- Regularly check **Settings → System → Logs** for unusual login attempts
+
+**Open WebUI:**
+- Disable "Enable New Sign Ups" after creating your account (Settings → General)
+- Consider enabling Open WebUI's built-in OAuth/SSO to reuse existing credentials
+
+**General:**
+- Keep Proxmox, HAOS, Docker images, and Minisforum firmware updated
+- Your VPN is only as strong as your client devices — use Face ID and FileVault on Mac
+
+---
+
+## Part 9 — Siri → Local AI Passthrough ("Hey Siri, Ask Jarvis…")
+
+This wires Siri on any Apple device into your Ollama conversation agent. Saying *"Hey Siri, ask Jarvis"* sends your voice to your local HA server, runs it through the LLM, and reads the response back via Piper — all locally, nothing leaving your network.
+
+Works on iPhone, iPad, Mac, HomePod, and Apple Watch (via phone relay).
+
+### Prerequisites
+Before building the Shortcut, confirm these are already in place:
+- Ollama integration added in HA with a conversation agent (Part 5)
+- Piper TTS add-on installed and running (Part 6)
+- Tailscale installed so the Shortcut works both at home and remotely (Part 8)
+- A **Long-Lived Access Token** from HA: Profile → Security → Long-Lived Access Tokens → Create Token (copy it — shown only once)
+
+### Step 1 — Find your Ollama agent ID
+1. In HA → hamburger menu → **Developer Tools** → **States**
+2. Filter by `conversation`
+3. Find an entity like `conversation.ollama_qwen3_14b` — copy the full entity ID
+
+### Step 2 — Find your Piper voice ID
+1. **Settings → Add-ons → Piper** → note the voice name you configured (e.g., `en_US-lessac-medium`)
+2. Remove `.onnx.json` from the end if present — use just `en_US-lessac-medium`
+
+### Step 3 — Build the "Ask Jarvis" Shortcut
+Open **Shortcuts** on your iPhone and create a new shortcut with these actions in order:
+
+**Action 1 — Variables dictionary** (fill in once)
+
+Add a **Dictionary** action with:
+| Key | Value |
+|-----|-------|
+| `haURL` | `http://homeassistant.tail1234.ts.net:8123` (your Tailscale HA URL) |
+| `token` | your Long-Lived Access Token |
+| `agentID` | `conversation.ollama_qwen3_14b` (from Step 1) |
+| `piperVoice` | `en_US-lessac-medium` (from Step 2) |
+
+**Action 2 — Capture voice**
+
+Add **Dictate Text** → Language: English
+
+**Action 3 — Send to HA conversation API**
+
+Add **Get Contents of URL**:
+- URL: `[haURL]/api/conversation/process`
+- Method: **POST**
+- Headers: `Authorization: Bearer [token]`, `Content-Type: application/json`
+- Body (JSON):
+```json
+{
+  "text": "[Dictated Text]",
+  "agent_id": "[agentID]",
+  "language": "en"
+}
+```
+(Use the Shortcuts variable picker for `[Dictated Text]` and dictionary values)
+
+**Action 4 — Extract response text**
+
+Add **Get Dictionary Value** from the URL result — key path: `response → speech → plain → speech`
+
+**Action 5 — Speak via Piper TTS**
+
+Add another **Get Contents of URL**:
+- URL: `[haURL]/api/tts_get_url`
+- Method: POST, JSON body:
+```json
+{
+  "platform": "tts.piper",
+  "message": "[response from Action 4]",
+  "language": "en-US",
+  "options": { "voice": "[piperVoice]" }
+}
+```
+Then **Get Dictionary Value** → key: `url`
+Then **Play Sound** → use the extracted URL
+
+**Action 6 — Save**
+
+Rename the shortcut to **"Ask Jarvis"** (or any phrase you want to say to Siri) → Done.
+
+Say *"Hey Siri, Ask Jarvis"* — Siri hands off, you speak your question, Piper reads the response.
+
+### Shortcut: use the community pre-built version
+If building manually feels tedious, the HA community has a ready-made shortcut set (**Assist A + Assist B**) with smart voice/text switching:
+- Voice mode automatically when phone is face-down or connected to Bluetooth/CarPlay
+- Text input popup when face-up
+
+Install from: [community.home-assistant.io/t/talk-to-your-ha-voice-assistant-via-siri/905997](https://community.home-assistant.io/t/talk-to-your-ha-voice-assistant-via-siri/905997)
+
+Setup:
+1. Download and install **Assist A** and **Assist B** from the iCloud links in the post
+2. Edit **Assist B**: replace `AGENTID`, `URL`, and `TOKEN` with your values
+3. Run **Assist A** once to grant permissions
+4. Add **Assist A** to your iPhone **Action Button** (Settings → Action Button → Shortcut → Assist A)
+
+### Using this on HomePod
+To make *"Hey Siri"* on a HomePod trigger your local AI:
+1. **Settings → Automations → New Automation** in HA
+2. Trigger: **Webhook** (note the webhook ID)
+3. Action: **Media Player: Play Media** → target your HomePod entity → URL: Piper TTS URL from your Shortcut
+4. In your Shortcut, add a final step that calls this webhook — HA plays the audio through HomePod instead of your iPhone speaker
+
+---
+
+## Part 10 — Recommended Add-ons and Extensions
+
+### Install HACS (Home Assistant Community Store)
+HACS is the community package manager for HA — like npm for custom integrations and UI cards.
+
+1. **Settings → Add-ons → Add-on Store** → ⋮ → **Repositories** → add `https://github.com/hacs/integration`
+2. Install HACS → restart → **Settings → Devices & Services → Add HACS** → authorize via GitHub
+
+### Essential add-ons
+
+| Add-on | Purpose |
+|--------|---------|
+| **Mosquitto Broker** | MQTT broker for Zigbee2MQTT, Tasmota, and other IoT devices |
+| **Zigbee2MQTT** | Alternative Zigbee stack with broader device support than ZHA |
+| **Node-RED** | Visual flow-based automation builder — like n8n for your home |
+| **Studio Code Server** | VS Code in the browser for editing YAML configs |
+| **Nginx Proxy Manager** | (Optional) Manage HTTPS reverse proxy for internal services |
+
+---
+
+## Migration Checklist
+
+Use this to track your progress. Work through it top to bottom.
+
+### Preparation
+- [ ] Buy Sonoff Zigbee 3.0 USB Dongle Plus-E
+- [ ] Buy 8 GB+ USB flash drive for Proxmox installer
+- [ ] Create full backup on HA Yellow → download `.tar` file
+- [ ] Note backup encryption key
+
+### Part 1 — Proxmox
+- [ ] Download Proxmox VE ISO → flash to USB
+- [ ] BIOS: disable Secure Boot, enable AMD-V/SVM, USB boot first, power-on-after-AC-loss
+- [ ] Install Proxmox on 1 TB NVMe, set static IP `192.168.1.10`
+- [ ] Access web UI at `https://192.168.1.10:8006`
+- [ ] Run `scripts/01-proxmox-post-install.sh` → reboot
+
+### Part 2 — Home Assistant OS
+- [ ] Run HAOS community auto-install script (Advanced: 8 GB RAM, 4 vCPU, 64 GB disk)
+- [ ] Start VM 100 → access `http://homeassistant.local:8123`
+- [ ] Restore HA Yellow backup → confirm all devices and automations are back
+- [ ] Assign static DHCP lease `192.168.1.100` to HA in router
+
+### Part 3 — Zigbee
+- [ ] Plug Sonoff dongle into Minisforum USB
+- [ ] Find dongle USB ID with `lsusb` in Proxmox Shell
+- [ ] Add USB device to HAOS VM via Proxmox UI (Hardware → Add → USB Device)
+- [ ] Reboot HAOS VM
+- [ ] Configure ZHA or Zigbee2MQTT in HA → confirm devices reconnect
+
+### Part 4 — AI Stack
+- [ ] Run `scripts/02-download-ubuntu-template.sh` in Proxmox Shell
+- [ ] Create LXC CT 101 (`ai-stack`): 10–12 cores, 48 GB RAM, 200 GB disk, Nesting enabled
+- [ ] Run `scripts/03-setup-ai-stack.sh` inside CT 101
+- [ ] Confirm Open WebUI loads at `http://192.168.1.101:3000`
+- [ ] Create admin account in Open WebUI → disable new sign-ups
+- [ ] Assign static DHCP lease `192.168.1.101` to `ai-stack` in router
+
+### Part 5 — Ollama ↔ HA
+- [ ] Add Ollama integration in HA → URL: `http://192.168.1.101:11434`
+- [ ] Create conversation agent with `qwen3:4b`
+- [ ] Expose entities → test via Assist (`e` key in HA)
+
+### Part 6 — Voice Assistant
+- [ ] Install Faster Whisper, Piper, openWakeWord add-ons in HA
+- [ ] Confirm Wyoming integration auto-discovered
+- [ ] Create voice pipeline "Home AI" in HA
+- [ ] Onboard Home Assistant Voice Preview Edition
+
+### Part 7 — Open WebUI ↔ HA
+- [ ] Generate Long-Lived Access Token in HA (Profile → Security)
+- [ ] Connect HA tool in Open WebUI with token and HA URL
+- [ ] Test: type "turn on the living room lights" in Open WebUI chat
+
+### Part 8 — Remote Access
+- [ ] **Tailscale (recommended):** Run `scripts/04-tailscale-proxmox.sh` → approve subnet route in admin console → install HA add-on → install on iPhone + Mac
+- [ ] OR **WireGuard:** Run community LXC installer → run `scripts/05-wireguard-lxc-harden.sh` → configure WGDashboard → open UDP 51820 in router
+- [ ] Test remote access: turn off Wi-Fi on iPhone → confirm HA loads
+
+### Part 9 — Siri Passthrough
+- [ ] Find Ollama agent entity ID in Developer Tools
+- [ ] Build "Ask Jarvis" Shortcut (or install community Assist A/B)
+- [ ] Test: "Hey Siri, Ask Jarvis" → confirm local AI responds
+
+### Part 10 — Polish
+- [ ] Install HACS → add Node-RED, Mosquitto, Studio Code Server
+- [ ] Run HA Yellow in parallel for 1 week → decommission after confirmed stable
+
+---
+
+## Resource Allocation Reference
+
+| Component | vCPU | RAM | Disk |
+|-----------|------|-----|------|
+| Proxmox host OS | — | ~2 GB reserved | System NVMe |
+| HAOS VM (VM 100) | 4 cores | 8 GB | 64 GB |
+| Ubuntu AI LXC (CT 101) | 10–12 cores | 48 GB | 200 GB |
+| Headroom / buffer | — | ~6 GB | — |
+| **Total** | | **64 GB** | |
+
+Allocations can be adjusted in Proxmox at any time without reinstalling anything.
+
+---
+
+## Script Quick Reference
+
+| Script | Where to run | Replaces |
+|--------|-------------|---------|
+| `scripts/01-proxmox-post-install.sh` | Proxmox Shell | Part 1, Step 5 |
+| `scripts/02-download-ubuntu-template.sh` | Proxmox Shell | Part 4, Step 1 |
+| `scripts/03-setup-ai-stack.sh` | Inside CT 101 shell | Part 4, Steps 3–4 |
+| `scripts/04-tailscale-proxmox.sh` | Proxmox Shell | Part 8, Option A Steps 2–3 |
+| `scripts/05-wireguard-lxc-harden.sh` | Inside WireGuard LXC shell | Part 8, Option B Steps 3–4 |
+| `scripts/06-pull-models.sh` | Inside CT 101 shell | Part 4, Step 4 (model management) |
