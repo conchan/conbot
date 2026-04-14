@@ -23,23 +23,24 @@
 
 ## Recommended Setup Order
 
-The parts in this guide are numbered by logical grouping, not by the order you should follow. The recommended sequence is:
+The parts in this guide are numbered in the order you should follow them. Parts 6 and 7 (Zigbee and Matter) are intentionally placed after the AI stack so you have a local assistant available during the most variable setup steps.
 
-| Step | Part | Why |
-|------|------|-----|
-| 1 | Part 1 — Proxmox | Foundation everything else runs on |
-| 2 | Part 2 — Home Assistant OS | Get HA running and your Yellow backup restored |
-| 3 | Part 4 — AI Stack (LXC + Ollama + Open WebUI) | Get the AI online early |
-| 4 | Part 5 — Wire Ollama to HA | Connect the two so the AI knows your HA entities |
-| 5 | Part 6 — Voice Assistant | Voice pipeline needs both HA and Ollama running |
-| 6 | **Part 3 — Zigbee** | Do this with the AI already running — use Open WebUI to debug dongle issues |
-| 7 | **Part 3.5 — Matter & Thread** | Same — AI helps interpret commissioning errors in real time |
-| 8 | Part 7 — Open WebUI ↔ HA | Two-way chat control |
-| 9 | Part 8 — Remote Access & VPN | Lock down external access |
-| 10 | Part 9 — Siri Passthrough | Needs Tailscale (Part 8) to be in place first |
-| 11 | Part 10 — Add-ons & Extensions | Polish |
+| Part | Section | Why |
+|------|---------|-----|
+| Part 1  | Proxmox | Foundation everything else runs on |
+| Part 2  | Home Assistant OS | Get HA running and your Yellow backup restored |
+| Part 3  | AI Stack (LXC + Ollama + Open WebUI) | Get the AI online early — before Zigbee and Matter |
+| Part 4  | Wire Ollama to HA | Connect the two so the AI knows your HA entities |
+| Part 5  | Voice Assistant | Voice pipeline needs both HA and Ollama running |
+| **Part 6**  | **Zigbee** | AI is now running — use Open WebUI to debug dongle issues |
+| **Part 7**  | **Matter & Thread** | AI helps interpret commissioning errors in real time |
+| Part 8  | Open WebUI ↔ HA | Two-way chat control |
+| Part 9  | Remote Access & VPN | Lock down external access |
+| Part 10 | Siri Passthrough | Needs Tailscale (Part 9) to be in place first |
+| Part 11 | Add-ons & Extensions | Polish |
 
-> **Why move Zigbee and Matter later?** Once Ollama is wired to HA (after Part 5), you have a local AI that knows your HA setup and can help you work through integration errors, interpret logs, and suggest config values in real time. Zigbee and Matter setup have the most variability and the most opportunity to need that help. Neither depends on the AI stack, and the AI stack doesn't depend on them — so there's no cost to the reorder.
+
+> **Why are Parts 6 and 7 (Zigbee and Matter) placed after the AI stack?** Once Ollama is wired to HA (Part 4), you have a local AI that knows your HA setup and can help you work through integration errors, interpret logs, and suggest config values in real time. Zigbee and Matter setup have the most variability and the most opportunity to need that help. Neither depends on the AI stack, and the AI stack doesn't depend on them — so there's no cost to the reorder.
 
 ---
 
@@ -62,7 +63,7 @@ The parts in this guide are numbered by logical grouping, not by the order you s
 - **USB flash drive** (8 GB+) — for the Proxmox installer
 - **Ethernet cable** — wire the Minisforum directly to your router
 
-> **You already have what you need for Matter/Thread.** Your Apple TV 4K (2nd gen or 3rd gen Wi-Fi + Ethernet model) acts as the Thread border router — no additional hardware required. See Part 3.5 for the full setup.
+> **You already have what you need for Matter/Thread.** Your Apple TV 4K (2nd gen or 3rd gen Wi-Fi + Ethernet model) acts as the Thread border router — no additional hardware required. See Part 7 for the full setup.
 
 ### Back up HA Yellow first
 Do this before touching anything else. Keep the Yellow running in parallel until the new setup is confirmed stable.
@@ -171,9 +172,212 @@ In your **router's admin panel**, find the new `homeassistant` device in the DHC
 
 ---
 
-## Part 3 — Pass Through the Zigbee USB Dongle
+## Part 3 — Install Ollama + Open WebUI (AI Stack)
 
-> **Recommended: defer this until after Parts 4 and 5.** There are no dependencies — Zigbee setup doesn't require the AI stack and the AI stack doesn't require Zigbee. But once Ollama is wired to HA, you can paste dongle errors or Zigbee2MQTT logs directly into Open WebUI and get contextual help. See the [Recommended Setup Order](#recommended-setup-order) table above.
+> **Follow the [Recommended Setup Order](#recommended-setup-order) and do this before Parts 6 and 7.** Once the AI stack is live and wired to HA (Part 4), you'll have a local assistant you can actively use during the Zigbee and Matter setup steps.
+
+This runs in a separate Ubuntu LXC container, isolating AI inference from HAOS.
+
+### Step 1 — Download the Ubuntu 24.04 template
+> **Script available:** `scripts/02-download-ubuntu-template.sh` — automates this step.
+
+In **Node → Shell**:
+```bash
+pveam update
+pveam download local ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+```
+
+### Step 2 — Create the Ubuntu LXC container
+In Proxmox UI → **Datacenter → Node → Create CT**:
+
+| Setting | Value |
+|---------|-------|
+| CT ID | `101` |
+| Hostname | `ai-stack` |
+| Password | Set a strong root password |
+| Template | `ubuntu-24.04-standard_24.04-2_amd64.tar.zst` |
+| Disk | `200 GB` (models are large — one 14B model is ~9–10 GB) |
+| CPU | `10–12 cores` |
+| RAM | `48000 MB` (48 GB) |
+| Network | DHCP |
+| Features tab | Enable **"Nesting"** (required for Docker inside LXC) |
+
+Start the container after creating it.
+
+### Step 3 — Install Docker + deploy the AI stack
+> **Script available:** `scripts/03-setup-ai-stack.sh` — automates Steps 3 and 4 entirely. Run it inside CT 101's shell.
+
+Or manually — access CT 101 → Shell and run:
+
+```bash
+# Update system
+apt update && apt upgrade -y
+apt install -y curl ca-certificates gnupg lsb-release
+
+# Add Docker's official GPG key and repo
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+  > /etc/apt/sources.list.d/docker.list
+
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+systemctl enable docker
+```
+
+Then create and start the stack:
+
+```bash
+mkdir ~/ai-stack && cd ~/ai-stack
+cat > docker-compose.yml << 'EOF'
+services:
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: always
+    ports:
+      - "3000:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - open_webui_data:/app/backend/data
+    depends_on:
+      - ollama
+
+volumes:
+  ollama_data:
+  open_webui_data:
+EOF
+
+docker compose up -d
+```
+
+Open WebUI is now accessible at `http://192.168.1.101:3000`. The first account you create is the admin.
+
+### Step 4 — Pull your AI models
+> **Script available:** `scripts/04-pull-models.sh` — pulls both models by default. Run it inside CT 101's shell.
+
+Or manually:
+```bash
+# Voice assistant model (used by HA Assist / voice pipeline)
+docker exec -it ollama ollama pull qwen3:4b
+
+# Chat + MCP agent model (used by Open WebUI)
+docker exec -it ollama ollama pull qwen3:14b
+```
+
+Both models sit in memory simultaneously. Combined they use ~11 GB of your 48 GB allocation — well within headroom. There's no manual switching needed: HA's voice pipeline is wired to `qwen3:4b` and Open WebUI defaults to `qwen3:14b` automatically.
+
+**Model reference for your 48 GB container:**
+
+| Model | RAM Used | Speed | Role in this setup |
+|-------|----------|-------|--------------------|
+| `qwen3:4b` | ~4 GB | Fast | **HA voice pipeline** — fast enough for voice, handles device commands perfectly |
+| `qwen3:14b` | ~10 GB | Medium | **Open WebUI + MCP agents** — better quality for deliberate tasks |
+| `qwen3:30b-a3b` (MoE) | ~20 GB | Medium | Optional: near-GPT-4 quality if you want to experiment |
+| `llama3.1:70b` (Q4) | ~40 GB | Slow | Optional: maximum capability, leaves little headroom |
+
+### Step 5 — Assign a static IP to the AI container
+In your **router's admin panel**, assign a static DHCP lease for `ai-stack` (e.g., `192.168.1.101`).
+
+### A note on GPU acceleration (Radeon 890M)
+The Radeon 890M uses `gfx1150`, which as of early 2026 is not fully supported by Ollama's ROCm backend. Ollama defaults to **CPU inference** — still ~15–25 tokens/second for 7B models on this chip, which is perfectly usable for a home voice assistant.
+
+To experiment with GPU acceleration later, add this to the `ollama` service in `docker-compose.yml`:
+```yaml
+environment:
+  - HSA_OVERRIDE_GFX_VERSION=11.0.0
+```
+Results vary. Check [github.com/ollama/ollama/issues/9999](https://github.com/ollama/ollama/issues/9999) for current `gfx1150` status.
+
+---
+
+## Part 4 — Connect Ollama to Home Assistant
+
+### Step 1 — Add the Ollama integration
+1. **Settings → Devices & Services → Add Integration**
+2. Search for **"Ollama"** → select it
+3. Enter the URL: `http://192.168.1.101:11434`
+4. Submit
+
+### Step 2 — Create a conversation agent
+1. Open the Ollama integration card → cogwheel → **Add conversation agent**
+2. Select your model: **`qwen3:4b`** — this is the voice-optimised model; fast response times matter here
+3. Check the **"Assist"** checkbox — this grants the LLM access to your HA entities so it can control devices
+
+### Step 3 — Expose devices to the AI
+1. **Settings → Voice Assistants → Expose**
+2. Toggle on the entities you want the AI to see and control
+3. Start with lights in one room, then expand once confirmed working
+
+### Step 4 — Test
+Press `e` in Home Assistant to open Assist. Switch the conversation agent dropdown to Ollama. Try:
+- *"What's the temperature in the living room?"*
+- *"Turn off all the lights in the kitchen"*
+
+> **AI stack is now live. This is the point to go back and complete Parts 6 and 7** if you deferred them. You can use Open WebUI at `http://192.168.1.101:3000` as an active assistant while you work through Zigbee and Matter setup:
+>
+> - **Paste HA log output** directly into Open WebUI and ask what it means
+> - **Describe what you're seeing** in the Proxmox or HA UI and ask what to do next
+> - **Ask for config values** — e.g. "what's the correct ZHA path for a Sonoff Zigbee dongle on a Proxmox USB passthrough?"
+> - **Interpret commissioning errors** — Matter errors are often cryptic; paste them and ask
+>
+> Open a browser tab with Open WebUI alongside your HA tab. The `qwen3:14b` model running locally is the equivalent of having a knowledgeable assistant sitting next to you during setup — and nothing you type leaves your network.
+
+---
+
+## Part 5 — Local Voice Assistant (Alexa Replacement)
+
+This builds a fully offline voice pipeline — no audio leaves your house.
+
+### Step 1 — Install speech add-ons in HAOS
+**Settings → Add-ons → Add-on Store** — install and start all three:
+
+| Add-on | Purpose | Config |
+|--------|---------|--------|
+| **Faster Whisper** | Speech-to-text | Language: `en`, model size: `small` or `medium` |
+| **Piper** | Text-to-speech | Voice: `en_US-lessac-medium` (natural-sounding default) |
+| **openWakeWord** | Wake word detection | Wake word: `hey_jarvis` or `ok_nabu` |
+
+Use Faster Whisper (not standard Whisper) — it's significantly faster on CPU.
+
+### Step 2 — Wyoming integration
+HA will auto-discover the Wyoming protocol services from these add-ons. Go to **Settings → Devices & Services** and click **Add** on any Wyoming notifications that appear.
+
+### Step 3 — Build the voice pipeline
+1. **Settings → Voice Assistants → Add Assistant**
+2. Name it (e.g., "Home AI")
+3. Configure:
+   - **Wake word engine:** openWakeWord
+   - **Wake word:** your chosen phrase
+   - **Speech-to-text:** Faster Whisper
+   - **Conversation agent:** Ollama (`qwen3:4b`) — the fast model, configured separately from Open WebUI
+   - **Text-to-speech:** Piper
+4. Save
+
+### Step 4 — Connect the Home Assistant Voice Preview Edition
+1. Power on the Voice PE box — it discovers your HA instance automatically via its onboarding wizard
+2. In HA → **Settings → Devices & Services** → find the new Voice PE device
+3. Assign it to your "Home AI" pipeline
+4. Say your wake word — LED ring lights up, you speak, response plays through the built-in speaker
+
+You can place multiple Voice Preview boxes in different rooms — each connects to the same pipeline.
+
+---
+
+## Part 6 — Pass Through the Zigbee USB Dongle
+
+> **This part is intentionally placed here** — after the AI stack (Parts 3–5) is running. Zigbee setup doesn't require the AI, but once Ollama is wired to HA you can paste dongle errors or Zigbee2MQTT logs directly into Open WebUI and get contextual help. See the [Recommended Setup Order](#recommended-setup-order) table above.
 
 Plug the Sonoff Zigbee dongle into a USB port on the Minisforum.
 
@@ -202,13 +406,13 @@ Proxmox UI → HAOS VM → **Reboot**
    - ZHA: Settings → Add Integration → "Zigbee Home Automation" → select dongle path (usually `/dev/ttyUSB0` or `/dev/serial/by-id/...`)
 3. Zigbee devices should reconnect within minutes — if any don't reconnect overnight, power-cycle them
 
-> **Thread/Matter:** The Yellow's built-in Thread radio does not transfer to USB. Your Apple TV 4K is already acting as a Thread border router on your network — no USB radio needed. **Proceed to Part 3.5** to connect your Matter devices to Home Assistant via the Apple TV.
+> **Thread/Matter:** The Yellow's built-in Thread radio does not transfer to USB. Your Apple TV 4K is already acting as a Thread border router on your network — no USB radio needed. **Proceed to Part 7** to connect your Matter devices to Home Assistant via the Apple TV.
 
 ---
 
-## Part 3.5 — Matter & Thread (Apple TV 4K as Border Router)
+## Part 7 — Matter & Thread (Apple TV 4K as Border Router)
 
-> **Recommended: defer this until after Parts 4 and 5.** Matter commissioning has more moving parts than Zigbee (IPv6, multicast, Thread credentials, multi-fabric), and errors often show up as silent failures. Having Open WebUI running with `qwen3:14b` means you can paste your HA logs or describe what you're seeing and get actionable help without leaving your desk. See the [Recommended Setup Order](#recommended-setup-order) table above.
+> **This part is intentionally placed here** — after the AI stack (Parts 3–5) is running. Matter commissioning has more moving parts than Zigbee (IPv6, multicast, Thread credentials, multi-fabric), and errors often show up as silent failures. Having Open WebUI running with `qwen3:14b` means you can paste your HA logs or describe what you're seeing and get actionable help without leaving your desk. See the [Recommended Setup Order](#recommended-setup-order) table above.
 
 ### Background: Thread vs. Matter vs. Zigbee
 
@@ -222,7 +426,7 @@ These three terms often get conflated. Here's what each one actually is:
 
 Your Apple TV 4K is a **Thread border router** — it bridges your Thread radio mesh to your regular IP network so Home Assistant (and other controllers) can talk to Thread-based Matter devices. The Apple TV handles the radio; HA handles the control.
 
-Critically: your Zigbee setup (via the Sonoff dongle from Part 3) and your Matter/Thread setup are completely independent. One doesn't affect the other.
+Critically: your Zigbee setup (via the Sonoff dongle from Part 6) and your Matter/Thread setup are completely independent. One doesn't affect the other.
 
 ### Apple TV 4K model check — Thread support
 
@@ -366,210 +570,7 @@ Matter's multi-fabric feature means both controllers see live state updates — 
 
 ---
 
-## Part 4 — Install Ollama + Open WebUI (AI Stack)
-
-> **Follow the [Recommended Setup Order](#recommended-setup-order) and do this before Parts 3 and 3.5.** Once the AI stack is live and wired to HA (Part 5), you'll have a local assistant you can actively use during the Zigbee and Matter setup steps.
-
-This runs in a separate Ubuntu LXC container, isolating AI inference from HAOS.
-
-### Step 1 — Download the Ubuntu 24.04 template
-> **Script available:** `scripts/02-download-ubuntu-template.sh` — automates this step.
-
-In **Node → Shell**:
-```bash
-pveam update
-pveam download local ubuntu-24.04-standard_24.04-2_amd64.tar.zst
-```
-
-### Step 2 — Create the Ubuntu LXC container
-In Proxmox UI → **Datacenter → Node → Create CT**:
-
-| Setting | Value |
-|---------|-------|
-| CT ID | `101` |
-| Hostname | `ai-stack` |
-| Password | Set a strong root password |
-| Template | `ubuntu-24.04-standard_24.04-2_amd64.tar.zst` |
-| Disk | `200 GB` (models are large — one 14B model is ~9–10 GB) |
-| CPU | `10–12 cores` |
-| RAM | `48000 MB` (48 GB) |
-| Network | DHCP |
-| Features tab | Enable **"Nesting"** (required for Docker inside LXC) |
-
-Start the container after creating it.
-
-### Step 3 — Install Docker + deploy the AI stack
-> **Script available:** `scripts/03-setup-ai-stack.sh` — automates Steps 3 and 4 entirely. Run it inside CT 101's shell.
-
-Or manually — access CT 101 → Shell and run:
-
-```bash
-# Update system
-apt update && apt upgrade -y
-apt install -y curl ca-certificates gnupg lsb-release
-
-# Add Docker's official GPG key and repo
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-  https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-  > /etc/apt/sources.list.d/docker.list
-
-apt update
-apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-systemctl enable docker
-```
-
-Then create and start the stack:
-
-```bash
-mkdir ~/ai-stack && cd ~/ai-stack
-cat > docker-compose.yml << 'EOF'
-services:
-  ollama:
-    image: ollama/ollama
-    container_name: ollama
-    restart: always
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    restart: always
-    ports:
-      - "3000:8080"
-    environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-    volumes:
-      - open_webui_data:/app/backend/data
-    depends_on:
-      - ollama
-
-volumes:
-  ollama_data:
-  open_webui_data:
-EOF
-
-docker compose up -d
-```
-
-Open WebUI is now accessible at `http://192.168.1.101:3000`. The first account you create is the admin.
-
-### Step 4 — Pull your AI models
-> **Script available:** `scripts/04-pull-models.sh` — pulls both models by default. Run it inside CT 101's shell.
-
-Or manually:
-```bash
-# Voice assistant model (used by HA Assist / voice pipeline)
-docker exec -it ollama ollama pull qwen3:4b
-
-# Chat + MCP agent model (used by Open WebUI)
-docker exec -it ollama ollama pull qwen3:14b
-```
-
-Both models sit in memory simultaneously. Combined they use ~11 GB of your 48 GB allocation — well within headroom. There's no manual switching needed: HA's voice pipeline is wired to `qwen3:4b` and Open WebUI defaults to `qwen3:14b` automatically.
-
-**Model reference for your 48 GB container:**
-
-| Model | RAM Used | Speed | Role in this setup |
-|-------|----------|-------|--------------------|
-| `qwen3:4b` | ~4 GB | Fast | **HA voice pipeline** — fast enough for voice, handles device commands perfectly |
-| `qwen3:14b` | ~10 GB | Medium | **Open WebUI + MCP agents** — better quality for deliberate tasks |
-| `qwen3:30b-a3b` (MoE) | ~20 GB | Medium | Optional: near-GPT-4 quality if you want to experiment |
-| `llama3.1:70b` (Q4) | ~40 GB | Slow | Optional: maximum capability, leaves little headroom |
-
-### Step 5 — Assign a static IP to the AI container
-In your **router's admin panel**, assign a static DHCP lease for `ai-stack` (e.g., `192.168.1.101`).
-
-### A note on GPU acceleration (Radeon 890M)
-The Radeon 890M uses `gfx1150`, which as of early 2026 is not fully supported by Ollama's ROCm backend. Ollama defaults to **CPU inference** — still ~15–25 tokens/second for 7B models on this chip, which is perfectly usable for a home voice assistant.
-
-To experiment with GPU acceleration later, add this to the `ollama` service in `docker-compose.yml`:
-```yaml
-environment:
-  - HSA_OVERRIDE_GFX_VERSION=11.0.0
-```
-Results vary. Check [github.com/ollama/ollama/issues/9999](https://github.com/ollama/ollama/issues/9999) for current `gfx1150` status.
-
----
-
-## Part 5 — Connect Ollama to Home Assistant
-
-### Step 1 — Add the Ollama integration
-1. **Settings → Devices & Services → Add Integration**
-2. Search for **"Ollama"** → select it
-3. Enter the URL: `http://192.168.1.101:11434`
-4. Submit
-
-### Step 2 — Create a conversation agent
-1. Open the Ollama integration card → cogwheel → **Add conversation agent**
-2. Select your model: **`qwen3:4b`** — this is the voice-optimised model; fast response times matter here
-3. Check the **"Assist"** checkbox — this grants the LLM access to your HA entities so it can control devices
-
-### Step 3 — Expose devices to the AI
-1. **Settings → Voice Assistants → Expose**
-2. Toggle on the entities you want the AI to see and control
-3. Start with lights in one room, then expand once confirmed working
-
-### Step 4 — Test
-Press `e` in Home Assistant to open Assist. Switch the conversation agent dropdown to Ollama. Try:
-- *"What's the temperature in the living room?"*
-- *"Turn off all the lights in the kitchen"*
-
-> **AI stack is now live. This is the point to go back and complete Parts 3 and 3.5** if you deferred them. You can use Open WebUI at `http://192.168.1.101:3000` as an active assistant while you work through Zigbee and Matter setup:
->
-> - **Paste HA log output** directly into Open WebUI and ask what it means
-> - **Describe what you're seeing** in the Proxmox or HA UI and ask what to do next
-> - **Ask for config values** — e.g. "what's the correct ZHA path for a Sonoff Zigbee dongle on a Proxmox USB passthrough?"
-> - **Interpret commissioning errors** — Matter errors are often cryptic; paste them and ask
->
-> Open a browser tab with Open WebUI alongside your HA tab. The `qwen3:14b` model running locally is the equivalent of having a knowledgeable assistant sitting next to you during setup — and nothing you type leaves your network.
-
----
-
-## Part 6 — Local Voice Assistant (Alexa Replacement)
-
-This builds a fully offline voice pipeline — no audio leaves your house.
-
-### Step 1 — Install speech add-ons in HAOS
-**Settings → Add-ons → Add-on Store** — install and start all three:
-
-| Add-on | Purpose | Config |
-|--------|---------|--------|
-| **Faster Whisper** | Speech-to-text | Language: `en`, model size: `small` or `medium` |
-| **Piper** | Text-to-speech | Voice: `en_US-lessac-medium` (natural-sounding default) |
-| **openWakeWord** | Wake word detection | Wake word: `hey_jarvis` or `ok_nabu` |
-
-Use Faster Whisper (not standard Whisper) — it's significantly faster on CPU.
-
-### Step 2 — Wyoming integration
-HA will auto-discover the Wyoming protocol services from these add-ons. Go to **Settings → Devices & Services** and click **Add** on any Wyoming notifications that appear.
-
-### Step 3 — Build the voice pipeline
-1. **Settings → Voice Assistants → Add Assistant**
-2. Name it (e.g., "Home AI")
-3. Configure:
-   - **Wake word engine:** openWakeWord
-   - **Wake word:** your chosen phrase
-   - **Speech-to-text:** Faster Whisper
-   - **Conversation agent:** Ollama (`qwen3:4b`) — the fast model, configured separately from Open WebUI
-   - **Text-to-speech:** Piper
-4. Save
-
-### Step 4 — Connect the Home Assistant Voice Preview Edition
-1. Power on the Voice PE box — it discovers your HA instance automatically via its onboarding wizard
-2. In HA → **Settings → Devices & Services** → find the new Voice PE device
-3. Assign it to your "Home AI" pipeline
-4. Say your wake word — LED ring lights up, you speak, response plays through the built-in speaker
-
-You can place multiple Voice Preview boxes in different rooms — each connects to the same pipeline.
-
----
-
-## Part 7 — Open WebUI ↔ Home Assistant (Two-Way Control)
+## Part 8 — Open WebUI ↔ Home Assistant (Two-Way Control)
 
 This lets you type natural language commands to your smart home from the Open WebUI chat interface.
 
@@ -589,7 +590,7 @@ This lets you type natural language commands to your smart home from the Open We
 
 ---
 
-## Part 8 — Remote Access & VPN
+## Part 9 — Remote Access & VPN
 
 > **Never forward port 8123 (or any service port) directly to the internet.** Use a VPN so devices must authenticate before reaching anything on your home network.
 
@@ -773,7 +774,7 @@ Using the DDNS hostname (not a raw IP) means your config never breaks when your 
 
 ---
 
-## Part 9 — Siri → Local AI Passthrough ("Hey Siri, Ask Jarvis…")
+## Part 10 — Siri → Local AI Passthrough ("Hey Siri, Ask Jarvis…")
 
 This wires Siri on any Apple device into your Ollama conversation agent. Saying *"Hey Siri, ask Jarvis"* sends your voice to your local HA server, runs it through the LLM, and reads the response back via Piper — all locally, nothing leaving your network.
 
@@ -781,9 +782,9 @@ Works on iPhone, iPad, Mac, HomePod, and Apple Watch (via phone relay).
 
 ### Prerequisites
 Before building the Shortcut, confirm these are already in place:
-- Ollama integration added in HA with a conversation agent (Part 5)
-- Piper TTS add-on installed and running (Part 6)
-- Tailscale installed so the Shortcut works both at home and remotely (Part 8)
+- Ollama integration added in HA with a conversation agent (Part 4)
+- Piper TTS add-on installed and running (Part 5)
+- Tailscale installed so the Shortcut works both at home and remotely (Part 9)
 - A **Long-Lived Access Token** from HA: Profile → Security → Long-Lived Access Tokens → Create Token (copy it — shown only once)
 
 ### Step 1 — Find your Ollama agent ID
@@ -877,7 +878,7 @@ To make *"Hey Siri"* on a HomePod trigger your local AI:
 
 ---
 
-## Part 10 — Recommended Add-ons and Extensions
+## Part 11 — Recommended Add-ons and Extensions
 
 ### Install HACS (Home Assistant Community Store)
 HACS is the community package manager for HA — like npm for custom integrations and UI cards.
@@ -920,7 +921,7 @@ Work through this in order. The sequence follows the [Recommended Setup Order](#
 - [ ] Restore HA Yellow backup → confirm all devices and automations are back
 - [ ] Assign static DHCP lease `192.168.1.100` to HA in router
 
-### Step 3 — Part 4: AI Stack
+### Step 3 — Part 3: AI Stack
 - [ ] Run `scripts/02-download-ubuntu-template.sh` in Proxmox Shell
 - [ ] Create LXC CT 101 (`ai-stack`) in Proxmox UI: 10–12 cores, 48 GB RAM, 200 GB disk, Nesting enabled
 - [ ] Run `scripts/03-setup-ai-stack.sh` inside CT 101 shell
@@ -928,27 +929,27 @@ Work through this in order. The sequence follows the [Recommended Setup Order](#
 - [ ] Create admin account in Open WebUI → disable new sign-ups
 - [ ] Assign static DHCP lease `192.168.1.101` to `ai-stack` in router
 
-### Step 4 — Part 5: Wire Ollama to HA
+### Step 4 — Part 4: Wire Ollama to HA
 - [ ] Add Ollama integration in HA → URL: `http://192.168.1.101:11434`
 - [ ] Create conversation agent with `qwen3:4b` (voice model)
 - [ ] Confirm Open WebUI defaults to `qwen3:14b` (set via `DEFAULT_MODELS` env var in docker-compose)
 - [ ] Expose entities → test via Assist (`e` key in HA)
 - [ ] **AI assistant is now available** — open `http://192.168.1.101:3000` alongside HA for the steps below
 
-### Step 5 — Part 6: Voice Assistant
+### Step 5 — Part 5: Voice Assistant
 - [ ] Install Faster Whisper, Piper, openWakeWord add-ons in HA
 - [ ] Confirm Wyoming integration auto-discovered
 - [ ] Create voice pipeline "Home AI" in HA
 - [ ] Onboard Home Assistant Voice Preview Edition
 
-### Step 6 — Part 3: Zigbee *(use Open WebUI to help debug if needed)*
+### Step 6 — Part 6: Zigbee *(use Open WebUI to help debug if needed)*
 - [ ] Plug Sonoff dongle into Minisforum USB
 - [ ] Find dongle USB ID with `lsusb` in Proxmox Shell
 - [ ] Add USB device to HAOS VM via Proxmox UI (Hardware → Add → USB Device)
 - [ ] Reboot HAOS VM
 - [ ] Configure ZHA or Zigbee2MQTT in HA → confirm devices reconnect
 
-### Step 7 — Part 3.5: Matter & Thread *(use Open WebUI to help debug if needed)*
+### Step 7 — Part 7: Matter & Thread *(use Open WebUI to help debug if needed)*
 - [ ] Confirm Apple TV 4K model supports Thread (Settings → General → About → Model)
 - [ ] Confirm Apple TV is connected as a home hub in the iPhone Home app
 - [ ] Run `scripts/07-matter-prereq-check.sh` in Proxmox Shell → fix any failures
@@ -960,22 +961,22 @@ Work through this in order. The sequence follows the [Recommended Setup Order](#
 - [ ] Add each Matter device using Method A (new) or Method B (already in Apple Home)
 - [ ] Verify device control works from both HA and Apple Home
 
-### Step 8 — Part 7: Open WebUI ↔ HA
+### Step 8 — Part 8: Open WebUI ↔ HA
 - [ ] Generate Long-Lived Access Token in HA (Profile → Security)
 - [ ] Connect HA tool in Open WebUI with token and HA URL
 - [ ] Test: type "turn on the living room lights" in Open WebUI chat
 
-### Step 9 — Part 8: Remote Access
+### Step 9 — Part 9: Remote Access
 - [ ] **Tailscale (recommended):** Run `scripts/05-tailscale-proxmox.sh` → approve subnet route in admin console → install HA add-on → install on iPhone + Mac
 - [ ] OR **WireGuard:** Run community LXC installer → run `scripts/06-wireguard-lxc-harden.sh` → configure WGDashboard → open UDP 51820 in router
 - [ ] Test remote access: turn off Wi-Fi on iPhone → confirm HA loads
 
-### Step 10 — Part 9: Siri Passthrough
+### Step 10 — Part 10: Siri Passthrough
 - [ ] Find Ollama agent entity ID in Developer Tools
 - [ ] Build "Ask Jarvis" Shortcut (or install community Assist A/B)
 - [ ] Test: "Hey Siri, Ask Jarvis" → confirm local AI responds
 
-### Step 11 — Part 10: Polish
+### Step 11 — Part 11: Polish
 - [ ] Install HACS → add Node-RED, Mosquitto, Studio Code Server
 - [ ] Run HA Yellow in parallel for 1 week → decommission after confirmed stable
 
@@ -1000,9 +1001,9 @@ Allocations can be adjusted in Proxmox at any time without reinstalling anything
 | Script | Where to run | Replaces |
 |--------|-------------|---------|
 | `scripts/01-proxmox-post-install.sh` | Proxmox Shell | Part 1, Step 5 |
-| `scripts/02-download-ubuntu-template.sh` | Proxmox Shell | Part 4, Step 1 |
-| `scripts/03-setup-ai-stack.sh` | Inside CT 101 shell | Part 4, Steps 3–4 |
-| `scripts/04-pull-models.sh` | Inside CT 101 shell | Part 4, Step 4 (model management) |
-| `scripts/05-tailscale-proxmox.sh` | Proxmox Shell | Part 8, Option A Steps 2–3 |
-| `scripts/06-wireguard-lxc-harden.sh` | Inside WireGuard LXC shell | Part 8, Option B Steps 3–4 |
-| `scripts/07-matter-prereq-check.sh` | Proxmox Shell | Part 3.5, pre-flight check |
+| `scripts/02-download-ubuntu-template.sh` | Proxmox Shell | Part 3, Step 1 |
+| `scripts/03-setup-ai-stack.sh` | Inside CT 101 shell | Part 3, Steps 3–4 |
+| `scripts/04-pull-models.sh` | Inside CT 101 shell | Part 3, Step 4 (model management) |
+| `scripts/05-tailscale-proxmox.sh` | Proxmox Shell | Part 9, Option A Steps 2–3 |
+| `scripts/06-wireguard-lxc-harden.sh` | Inside WireGuard LXC shell | Part 9, Option B Steps 3–4 |
+| `scripts/07-matter-prereq-check.sh` | Proxmox Shell | Part 7, pre-flight check |

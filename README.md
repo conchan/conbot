@@ -71,7 +71,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-se
 # 5b. Inside WireGuard LXC Shell — harden WireGuard (alternative to Tailscale):
 bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/06-wireguard-lxc-harden.sh)
 
-# 7. In Proxmox Shell — run Matter/Thread preflight check before Part 3.5:
+# 7. In Proxmox Shell — run Matter/Thread preflight check before Part 7:
 bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/07-matter-prereq-check.sh)
 ```
 
