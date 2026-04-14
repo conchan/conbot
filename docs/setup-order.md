@@ -102,6 +102,11 @@ Do this before touching anything else. Keep the Yellow running in parallel until
 8. Remove USB when prompted, let the machine reboot
 
 ### Step 4 — Access the Proxmox web UI
+
+> **This is the last step that requires a monitor and keyboard directly connected to the Minisforum.** Once the machine reboots into Proxmox, everything from here on — all remaining shell commands, VM/LXC creation, HA setup, and configuration — is done through a browser on any device connected to your home network. Disconnect the monitor and keyboard after this reboot if you like, then continue from your Mac, iPad, or any other device.
+>
+> Once you complete Part 9 (Remote Access), you can manage everything over Tailscale from anywhere — not just your home network.
+
 From any device on your network:
 ```
 https://192.168.1.10:8006
@@ -912,7 +917,7 @@ Work through this in order. The sequence follows the [Recommended Setup Order](#
 - [ ] Download Proxmox VE ISO → flash to USB
 - [ ] BIOS: disable Secure Boot, enable AMD-V/SVM, USB boot first, power-on-after-AC-loss
 - [ ] Install Proxmox on 1 TB NVMe, set static IP `192.168.1.10`
-- [ ] Access web UI at `https://192.168.1.10:8006`
+- [ ] Access web UI at `https://192.168.1.10:8006` ← **monitor/keyboard no longer needed after this point**
 - [ ] Run `scripts/01-proxmox-post-install.sh` in Proxmox Shell → reboot
 
 ### Step 2 — Part 2: Home Assistant OS
