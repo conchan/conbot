@@ -1,0 +1,50 @@
+# Ollama + Open WebUI — AI Inference Stack
+# Place this file at ~/ai-stack/docker-compose.yml on your Ubuntu LXC container.
+# Start with: docker compose up -d
+#
+# Resource allocation context (64 GB total on Minisforum AI X1 Pro-370):
+#   Proxmox host:  ~2 GB reserved
+#   HAOS VM:        8 GB
+#   This LXC:      48 GB  ← Ollama gets most of this
+#   Headroom:       ~6 GB
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # ── AMD GPU acceleration (experimental) ─────────────────────────────────
+    # The Radeon 890M uses gfx1150, which is not yet fully supported by ROCm.
+    # Uncomment the environment block below to experiment. CPU inference is
+    # ~15–25 tok/s for 7B models, which is perfectly usable without GPU.
+    # See: https://github.com/ollama/ollama/issues/9999
+    # environment:
+    #   - HSA_OVERRIDE_GFX_VERSION=11.0.0
+    # devices:
+    #   - /dev/kfd
+    #   - /dev/dri
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: always
+    ports:
+      - "3000:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      # Optional: set a default admin email for first-run setup
+      # - WEBUI_SECRET_KEY=change-me-to-a-random-string
+    volumes:
+      - open_webui_data:/app/backend/data
+    depends_on:
+      - ollama
+
+volumes:
+  ollama_data:
+    # Models are stored here — can be 10–100+ GB depending on what you pull
+  open_webui_data:
+    # Chat history, settings, and uploaded documents

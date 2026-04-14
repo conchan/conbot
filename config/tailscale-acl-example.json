@@ -1,0 +1,24 @@
+// Tailscale ACL Policy — paste into https://login.tailscale.com/admin/acls
+// This example restricts access so only your own devices (identified by email)
+// can reach Home Assistant and Open WebUI.
+//
+// Replace "your-email@example.com" with the email you used to sign up for Tailscale.
+// Replace "homeassistant" and "ai-stack" with your actual Tailscale machine names.
+//
+// After editing, click "Save" in the Tailscale admin console.
+{
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["your-email@example.com"],
+      "dst": [
+        "homeassistant:8123",
+        "ai-stack:443",
+        "ai-stack:3000",
+        "ai-stack:11434"
+      ]
+    }
+  ],
+  "tagOwners": {},
+  "tests": []
+}

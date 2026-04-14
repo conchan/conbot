@@ -1,0 +1,13 @@
+# Secrets — never commit these
+*.env
+.env.*
+secrets.yaml
+tokens.txt
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
