@@ -21,6 +21,28 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
+## Recommended Setup Order
+
+The parts in this guide are numbered by logical grouping, not by the order you should follow. The recommended sequence is:
+
+| Step | Part | Why |
+|------|------|-----|
+| 1 | Part 1 — Proxmox | Foundation everything else runs on |
+| 2 | Part 2 — Home Assistant OS | Get HA running and your Yellow backup restored |
+| 3 | Part 4 — AI Stack (LXC + Ollama + Open WebUI) | Get the AI online early |
+| 4 | Part 5 — Wire Ollama to HA | Connect the two so the AI knows your HA entities |
+| 5 | Part 6 — Voice Assistant | Voice pipeline needs both HA and Ollama running |
+| 6 | **Part 3 — Zigbee** | Do this with the AI already running — use Open WebUI to debug dongle issues |
+| 7 | **Part 3.5 — Matter & Thread** | Same — AI helps interpret commissioning errors in real time |
+| 8 | Part 7 — Open WebUI ↔ HA | Two-way chat control |
+| 9 | Part 8 — Remote Access & VPN | Lock down external access |
+| 10 | Part 9 — Siri Passthrough | Needs Tailscale (Part 8) to be in place first |
+| 11 | Part 10 — Add-ons & Extensions | Polish |
+
+> **Why move Zigbee and Matter later?** Once Ollama is wired to HA (after Part 5), you have a local AI that knows your HA setup and can help you work through integration errors, interpret logs, and suggest config values in real time. Zigbee and Matter setup have the most variability and the most opportunity to need that help. Neither depends on the AI stack, and the AI stack doesn't depend on them — so there's no cost to the reorder.
+
+---
+
 ## IP Address Plan
 
 | Service | Default IP | Port |
@@ -151,6 +173,8 @@ In your **router's admin panel**, find the new `homeassistant` device in the DHC
 
 ## Part 3 — Pass Through the Zigbee USB Dongle
 
+> **Recommended: defer this until after Parts 4 and 5.** There are no dependencies — Zigbee setup doesn't require the AI stack and the AI stack doesn't require Zigbee. But once Ollama is wired to HA, you can paste dongle errors or Zigbee2MQTT logs directly into Open WebUI and get contextual help. See the [Recommended Setup Order](#recommended-setup-order) table above.
+
 Plug the Sonoff Zigbee dongle into a USB port on the Minisforum.
 
 ### Step 1 — Find the dongle's USB ID
@@ -183,6 +207,8 @@ Proxmox UI → HAOS VM → **Reboot**
 ---
 
 ## Part 3.5 — Matter & Thread (Apple TV 4K as Border Router)
+
+> **Recommended: defer this until after Parts 4 and 5.** Matter commissioning has more moving parts than Zigbee (IPv6, multicast, Thread credentials, multi-fabric), and errors often show up as silent failures. Having Open WebUI running with `qwen3:14b` means you can paste your HA logs or describe what you're seeing and get actionable help without leaving your desk. See the [Recommended Setup Order](#recommended-setup-order) table above.
 
 ### Background: Thread vs. Matter vs. Zigbee
 
@@ -342,6 +368,8 @@ Matter's multi-fabric feature means both controllers see live state updates — 
 
 ## Part 4 — Install Ollama + Open WebUI (AI Stack)
 
+> **Follow the [Recommended Setup Order](#recommended-setup-order) and do this before Parts 3 and 3.5.** Once the AI stack is live and wired to HA (Part 5), you'll have a local assistant you can actively use during the Zigbee and Matter setup steps.
+
 This runs in a separate Ubuntu LXC container, isolating AI inference from HAOS.
 
 ### Step 1 — Download the Ubuntu 24.04 template
@@ -490,6 +518,15 @@ Results vary. Check [github.com/ollama/ollama/issues/9999](https://github.com/ol
 Press `e` in Home Assistant to open Assist. Switch the conversation agent dropdown to Ollama. Try:
 - *"What's the temperature in the living room?"*
 - *"Turn off all the lights in the kitchen"*
+
+> **AI stack is now live. This is the point to go back and complete Parts 3 and 3.5** if you deferred them. You can use Open WebUI at `http://192.168.1.101:3000` as an active assistant while you work through Zigbee and Matter setup:
+>
+> - **Paste HA log output** directly into Open WebUI and ask what it means
+> - **Describe what you're seeing** in the Proxmox or HA UI and ask what to do next
+> - **Ask for config values** — e.g. "what's the correct ZHA path for a Sonoff Zigbee dongle on a Proxmox USB passthrough?"
+> - **Interpret commissioning errors** — Matter errors are often cryptic; paste them and ask
+>
+> Open a browser tab with Open WebUI alongside your HA tab. The `qwen3:14b` model running locally is the equivalent of having a knowledgeable assistant sitting next to you during setup — and nothing you type leaves your network.
 
 ---
 
@@ -862,7 +899,7 @@ HACS is the community package manager for HA — like npm for custom integration
 
 ## Migration Checklist
 
-Use this to track your progress. Work through it top to bottom.
+Work through this in order. The sequence follows the [Recommended Setup Order](#recommended-setup-order) — AI stack comes before Zigbee and Matter so you have a local assistant available during the integration steps.
 
 ### Preparation
 - [ ] Buy Sonoff Zigbee 3.0 USB Dongle Plus-E
@@ -870,27 +907,48 @@ Use this to track your progress. Work through it top to bottom.
 - [ ] Create full backup on HA Yellow → download `.tar` file
 - [ ] Note backup encryption key
 
-### Part 1 — Proxmox
+### Step 1 — Part 1: Proxmox
 - [ ] Download Proxmox VE ISO → flash to USB
 - [ ] BIOS: disable Secure Boot, enable AMD-V/SVM, USB boot first, power-on-after-AC-loss
 - [ ] Install Proxmox on 1 TB NVMe, set static IP `192.168.1.10`
 - [ ] Access web UI at `https://192.168.1.10:8006`
-- [ ] Run `scripts/01-proxmox-post-install.sh` → reboot
+- [ ] Run `scripts/01-proxmox-post-install.sh` in Proxmox Shell → reboot
 
-### Part 2 — Home Assistant OS
-- [ ] Run HAOS community auto-install script (Advanced: 8 GB RAM, 4 vCPU, 64 GB disk)
+### Step 2 — Part 2: Home Assistant OS
+- [ ] Run HAOS community auto-install script in Proxmox Shell (Advanced: 8 GB RAM, 4 vCPU, 64 GB disk)
 - [ ] Start VM 100 → access `http://homeassistant.local:8123`
 - [ ] Restore HA Yellow backup → confirm all devices and automations are back
 - [ ] Assign static DHCP lease `192.168.1.100` to HA in router
 
-### Part 3 — Zigbee
+### Step 3 — Part 4: AI Stack
+- [ ] Run `scripts/02-download-ubuntu-template.sh` in Proxmox Shell
+- [ ] Create LXC CT 101 (`ai-stack`) in Proxmox UI: 10–12 cores, 48 GB RAM, 200 GB disk, Nesting enabled
+- [ ] Run `scripts/03-setup-ai-stack.sh` inside CT 101 shell
+- [ ] Confirm Open WebUI loads at `http://192.168.1.101:3000`
+- [ ] Create admin account in Open WebUI → disable new sign-ups
+- [ ] Assign static DHCP lease `192.168.1.101` to `ai-stack` in router
+
+### Step 4 — Part 5: Wire Ollama to HA
+- [ ] Add Ollama integration in HA → URL: `http://192.168.1.101:11434`
+- [ ] Create conversation agent with `qwen3:4b` (voice model)
+- [ ] Confirm Open WebUI defaults to `qwen3:14b` (set via `DEFAULT_MODELS` env var in docker-compose)
+- [ ] Expose entities → test via Assist (`e` key in HA)
+- [ ] **AI assistant is now available** — open `http://192.168.1.101:3000` alongside HA for the steps below
+
+### Step 5 — Part 6: Voice Assistant
+- [ ] Install Faster Whisper, Piper, openWakeWord add-ons in HA
+- [ ] Confirm Wyoming integration auto-discovered
+- [ ] Create voice pipeline "Home AI" in HA
+- [ ] Onboard Home Assistant Voice Preview Edition
+
+### Step 6 — Part 3: Zigbee *(use Open WebUI to help debug if needed)*
 - [ ] Plug Sonoff dongle into Minisforum USB
 - [ ] Find dongle USB ID with `lsusb` in Proxmox Shell
 - [ ] Add USB device to HAOS VM via Proxmox UI (Hardware → Add → USB Device)
 - [ ] Reboot HAOS VM
 - [ ] Configure ZHA or Zigbee2MQTT in HA → confirm devices reconnect
 
-### Part 3.5 — Matter & Thread
+### Step 7 — Part 3.5: Matter & Thread *(use Open WebUI to help debug if needed)*
 - [ ] Confirm Apple TV 4K model supports Thread (Settings → General → About → Model)
 - [ ] Confirm Apple TV is connected as a home hub in the iPhone Home app
 - [ ] Run `scripts/07-matter-prereq-check.sh` in Proxmox Shell → fix any failures
@@ -902,42 +960,22 @@ Use this to track your progress. Work through it top to bottom.
 - [ ] Add each Matter device using Method A (new) or Method B (already in Apple Home)
 - [ ] Verify device control works from both HA and Apple Home
 
-### Part 4 — AI Stack
-- [ ] Run `scripts/02-download-ubuntu-template.sh` in Proxmox Shell
-- [ ] Create LXC CT 101 (`ai-stack`): 10–12 cores, 48 GB RAM, 200 GB disk, Nesting enabled
-- [ ] Run `scripts/03-setup-ai-stack.sh` inside CT 101
-- [ ] Confirm Open WebUI loads at `http://192.168.1.101:3000`
-- [ ] Create admin account in Open WebUI → disable new sign-ups
-- [ ] Assign static DHCP lease `192.168.1.101` to `ai-stack` in router
-
-### Part 5 — Ollama ↔ HA
-- [ ] Add Ollama integration in HA → URL: `http://192.168.1.101:11434`
-- [ ] Create conversation agent with `qwen3:4b` (voice model)
-- [ ] Confirm Open WebUI defaults to `qwen3:14b` (set via `DEFAULT_MODELS` env var in docker-compose)
-- [ ] Expose entities → test via Assist (`e` key in HA)
-
-### Part 6 — Voice Assistant
-- [ ] Install Faster Whisper, Piper, openWakeWord add-ons in HA
-- [ ] Confirm Wyoming integration auto-discovered
-- [ ] Create voice pipeline "Home AI" in HA
-- [ ] Onboard Home Assistant Voice Preview Edition
-
-### Part 7 — Open WebUI ↔ HA
+### Step 8 — Part 7: Open WebUI ↔ HA
 - [ ] Generate Long-Lived Access Token in HA (Profile → Security)
 - [ ] Connect HA tool in Open WebUI with token and HA URL
 - [ ] Test: type "turn on the living room lights" in Open WebUI chat
 
-### Part 8 — Remote Access
+### Step 9 — Part 8: Remote Access
 - [ ] **Tailscale (recommended):** Run `scripts/04-tailscale-proxmox.sh` → approve subnet route in admin console → install HA add-on → install on iPhone + Mac
 - [ ] OR **WireGuard:** Run community LXC installer → run `scripts/05-wireguard-lxc-harden.sh` → configure WGDashboard → open UDP 51820 in router
 - [ ] Test remote access: turn off Wi-Fi on iPhone → confirm HA loads
 
-### Part 9 — Siri Passthrough
+### Step 10 — Part 9: Siri Passthrough
 - [ ] Find Ollama agent entity ID in Developer Tools
 - [ ] Build "Ask Jarvis" Shortcut (or install community Assist A/B)
 - [ ] Test: "Hey Siri, Ask Jarvis" → confirm local AI responds
 
-### Part 10 — Polish
+### Step 11 — Part 10: Polish
 - [ ] Install HACS → add Node-RED, Mosquitto, Studio Code Server
 - [ ] Run HA Yellow in parallel for 1 week → decommission after confirmed stable
 
