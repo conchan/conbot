@@ -9,7 +9,7 @@
 #   - Installs Docker + Docker Compose plugin
 #   - Creates ~/ai-stack/docker-compose.yml
 #   - Starts Ollama + Open WebUI containers
-#   - Pulls starter AI model (qwen3:14b)
+#   - Pulls both models: qwen3:4b (voice) and qwen3:14b (chat/MCP)
 # =============================================================================
 set -euo pipefail
 
@@ -26,9 +26,13 @@ AI_STACK_DIR="${HOME}/ai-stack"
 OLLAMA_PORT=11434
 WEBUI_PORT=3000
 
-# Models to pull after stack is up — edit this list to taste
+# Both models are pulled so they sit in memory simultaneously.
+#   qwen3:4b  → HA voice pipeline (fast response, handles device commands perfectly)
+#   qwen3:14b → Open WebUI chat + MCP agent workflows (higher quality for deliberate tasks)
+# Both fit comfortably within the 48 GB RAM allocation with headroom to spare.
 MODELS_TO_PULL=(
-  "qwen3:14b"   # ~10 GB — primary model; good balance of speed and capability on 48 GB RAM
+  "qwen3:4b"    # ~2.6 GB — voice assistant model
+  "qwen3:14b"   # ~8.2 GB — chat / MCP agent model
 )
 
 # =============================================================================
@@ -116,6 +120,7 @@ services:
       - "${WEBUI_PORT}:8080"
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
+      - DEFAULT_MODELS=qwen3:14b
     volumes:
       - open_webui_data:/app/backend/data
     depends_on:

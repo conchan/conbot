@@ -430,27 +430,28 @@ docker compose up -d
 
 Open WebUI is now accessible at `http://192.168.1.101:3000`. The first account you create is the admin.
 
-### Step 4 — Pull your first AI models
-> **Script available:** `scripts/06-pull-models.sh` — edit the model list at the top, then run inside CT 101.
+### Step 4 — Pull your AI models
+> **Script available:** `scripts/06-pull-models.sh` — pulls both models by default. Run it inside CT 101's shell.
 
 Or manually:
 ```bash
-# Pull the primary model
-docker exec -it ollama ollama pull qwen3:14b
+# Voice assistant model (used by HA Assist / voice pipeline)
+docker exec -it ollama ollama pull qwen3:4b
 
-# Test interactively
-docker exec -it ollama ollama run qwen3:14b
+# Chat + MCP agent model (used by Open WebUI)
+docker exec -it ollama ollama pull qwen3:14b
 ```
+
+Both models sit in memory simultaneously. Combined they use ~11 GB of your 48 GB allocation — well within headroom. There's no manual switching needed: HA's voice pipeline is wired to `qwen3:4b` and Open WebUI defaults to `qwen3:14b` automatically.
 
 **Model reference for your 48 GB container:**
 
-| Model | RAM Used | Speed | Best For |
-|-------|----------|-------|----------|
-| `qwen3:14b` | ~10 GB | Medium | **Primary model — use this** |
-| `qwen3:4b` | ~4 GB | Fast | Fallback if 14b feels slow |
-| `llama3.1:8b` | ~6 GB | Fast | Alternative general-purpose |
-| `qwen3:30b-a3b` (MoE) | ~20 GB | Medium | Near-GPT-4 quality, efficient |
-| `llama3.1:70b` (Q4) | ~40 GB | Slow | Maximum capability |
+| Model | RAM Used | Speed | Role in this setup |
+|-------|----------|-------|--------------------|
+| `qwen3:4b` | ~4 GB | Fast | **HA voice pipeline** — fast enough for voice, handles device commands perfectly |
+| `qwen3:14b` | ~10 GB | Medium | **Open WebUI + MCP agents** — better quality for deliberate tasks |
+| `qwen3:30b-a3b` (MoE) | ~20 GB | Medium | Optional: near-GPT-4 quality if you want to experiment |
+| `llama3.1:70b` (Q4) | ~40 GB | Slow | Optional: maximum capability, leaves little headroom |
 
 ### Step 5 — Assign a static IP to the AI container
 In your **router's admin panel**, assign a static DHCP lease for `ai-stack` (e.g., `192.168.1.101`).
@@ -477,7 +478,7 @@ Results vary. Check [github.com/ollama/ollama/issues/9999](https://github.com/ol
 
 ### Step 2 — Create a conversation agent
 1. Open the Ollama integration card → cogwheel → **Add conversation agent**
-2. Select your model: **`qwen3:14b`**
+2. Select your model: **`qwen3:4b`** — this is the voice-optimised model; fast response times matter here
 3. Check the **"Assist"** checkbox — this grants the LLM access to your HA entities so it can control devices
 
 ### Step 3 — Expose devices to the AI
@@ -517,7 +518,7 @@ HA will auto-discover the Wyoming protocol services from these add-ons. Go to **
    - **Wake word engine:** openWakeWord
    - **Wake word:** your chosen phrase
    - **Speech-to-text:** Faster Whisper
-   - **Conversation agent:** Ollama (`qwen3:14b`)
+   - **Conversation agent:** Ollama (`qwen3:4b`) — the fast model, configured separately from Open WebUI
    - **Text-to-speech:** Piper
 4. Save
 
@@ -751,7 +752,8 @@ Before building the Shortcut, confirm these are already in place:
 ### Step 1 — Find your Ollama agent ID
 1. In HA → hamburger menu → **Developer Tools** → **States**
 2. Filter by `conversation`
-3. Find an entity like `conversation.ollama_qwen3_14b` — copy the full entity ID
+3. Find an entity like `conversation.ollama_qwen3_4b` — copy the full entity ID
+   (The voice pipeline uses `qwen3:4b`; Open WebUI uses `qwen3:14b` separately)
 
 ### Step 2 — Find your Piper voice ID
 1. **Settings → Add-ons → Piper** → note the voice name you configured (e.g., `en_US-lessac-medium`)
@@ -767,7 +769,7 @@ Add a **Dictionary** action with:
 |-----|-------|
 | `haURL` | `http://homeassistant.tail1234.ts.net:8123` (your Tailscale HA URL) |
 | `token` | your Long-Lived Access Token |
-| `agentID` | `conversation.ollama_qwen3_14b` (from Step 1) |
+| `agentID` | `conversation.ollama_qwen3_4b` (from Step 1 — the voice agent, not the chat agent) |
 | `piperVoice` | `en_US-lessac-medium` (from Step 2) |
 
 **Action 2 — Capture voice**
@@ -910,7 +912,8 @@ Use this to track your progress. Work through it top to bottom.
 
 ### Part 5 — Ollama ↔ HA
 - [ ] Add Ollama integration in HA → URL: `http://192.168.1.101:11434`
-- [ ] Create conversation agent with `qwen3:14b`
+- [ ] Create conversation agent with `qwen3:4b` (voice model)
+- [ ] Confirm Open WebUI defaults to `qwen3:14b` (set via `DEFAULT_MODELS` env var in docker-compose)
 - [ ] Expose entities → test via Assist (`e` key in HA)
 
 ### Part 6 — Voice Assistant

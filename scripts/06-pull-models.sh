@@ -13,8 +13,13 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
 # --- Models to pull ----------------------------------------------------------
 # Comment/uncomment or add models. Sizes are approximate compressed download sizes.
+# Both default models are intentionally kept:
+#   qwen3:4b  → HA voice pipeline (fast, handles device commands perfectly)
+#   qwen3:14b → Open WebUI chat + MCP agent workflows (better quality for deliberate tasks)
+# Both fit within the 48 GB RAM allocation and sit in memory simultaneously.
 MODELS=(
-  "qwen3:14b"         # ~8.2 GB  — primary model; good balance of speed and capability on 48 GB RAM
+  "qwen3:4b"          # ~2.6 GB — voice assistant (HA Assist / voice pipeline)
+  "qwen3:14b"         # ~8.2 GB — Open WebUI chat + MCP agent workflows
   # "llama3.1:8b"     # ~4.7 GB  — Meta's general-purpose model
   # "qwen3:30b-a3b"   # ~17 GB   — MoE model, near GPT-4 quality, efficient
   # "llama3.1:70b"    # ~40 GB   — maximum capability, slow on CPU-only

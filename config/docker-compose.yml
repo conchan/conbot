@@ -36,7 +36,11 @@ services:
       - "3000:8080"
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
-      # Optional: set a default admin email for first-run setup
+      # Sets qwen3:14b as the default model in Open WebUI for chat and MCP agent workflows.
+      # The voice pipeline in Home Assistant independently uses qwen3:4b (configured in HA UI).
+      # Both models are loaded by Ollama and sit in memory simultaneously.
+      - DEFAULT_MODELS=qwen3:14b
+      # Optional: set a secret key for session security
       # - WEBUI_SECRET_KEY=change-me-to-a-random-string
     volumes:
       - open_webui_data:/app/backend/data
