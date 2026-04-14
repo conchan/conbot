@@ -435,23 +435,20 @@ Open WebUI is now accessible at `http://192.168.1.101:3000`. The first account y
 
 Or manually:
 ```bash
-# Fast 4B model — great starting point for the voice assistant
-docker exec -it ollama ollama pull qwen3:4b
-
-# More capable 14B model
+# Pull the primary model
 docker exec -it ollama ollama pull qwen3:14b
 
 # Test interactively
-docker exec -it ollama ollama run qwen3:4b
+docker exec -it ollama ollama run qwen3:14b
 ```
 
 **Model reference for your 48 GB container:**
 
 | Model | RAM Used | Speed | Best For |
 |-------|----------|-------|----------|
-| `qwen3:4b` | ~4 GB | Fast | Voice assistant, quick commands |
-| `llama3.1:8b` | ~6 GB | Fast | General Q&A, device control |
-| `qwen3:14b` | ~10 GB | Medium | Complex reasoning, writing |
+| `qwen3:14b` | ~10 GB | Medium | **Primary model — use this** |
+| `qwen3:4b` | ~4 GB | Fast | Fallback if 14b feels slow |
+| `llama3.1:8b` | ~6 GB | Fast | Alternative general-purpose |
 | `qwen3:30b-a3b` (MoE) | ~20 GB | Medium | Near-GPT-4 quality, efficient |
 | `llama3.1:70b` (Q4) | ~40 GB | Slow | Maximum capability |
 
@@ -480,7 +477,7 @@ Results vary. Check [github.com/ollama/ollama/issues/9999](https://github.com/ol
 
 ### Step 2 — Create a conversation agent
 1. Open the Ollama integration card → cogwheel → **Add conversation agent**
-2. Select your model (start with `qwen3:4b` for speed)
+2. Select your model: **`qwen3:14b`**
 3. Check the **"Assist"** checkbox — this grants the LLM access to your HA entities so it can control devices
 
 ### Step 3 — Expose devices to the AI
@@ -520,7 +517,7 @@ HA will auto-discover the Wyoming protocol services from these add-ons. Go to **
    - **Wake word engine:** openWakeWord
    - **Wake word:** your chosen phrase
    - **Speech-to-text:** Faster Whisper
-   - **Conversation agent:** Ollama (`qwen3:4b` for fastest response)
+   - **Conversation agent:** Ollama (`qwen3:14b`)
    - **Text-to-speech:** Piper
 4. Save
 
@@ -913,7 +910,7 @@ Use this to track your progress. Work through it top to bottom.
 
 ### Part 5 — Ollama ↔ HA
 - [ ] Add Ollama integration in HA → URL: `http://192.168.1.101:11434`
-- [ ] Create conversation agent with `qwen3:4b`
+- [ ] Create conversation agent with `qwen3:14b`
 - [ ] Expose entities → test via Assist (`e` key in HA)
 
 ### Part 6 — Voice Assistant

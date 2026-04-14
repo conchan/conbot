@@ -9,7 +9,7 @@
 #   - Installs Docker + Docker Compose plugin
 #   - Creates ~/ai-stack/docker-compose.yml
 #   - Starts Ollama + Open WebUI containers
-#   - Pulls starter AI models (qwen3:4b and qwen3:14b)
+#   - Pulls starter AI model (qwen3:14b)
 # =============================================================================
 set -euo pipefail
 
@@ -28,8 +28,7 @@ WEBUI_PORT=3000
 
 # Models to pull after stack is up — edit this list to taste
 MODELS_TO_PULL=(
-  "qwen3:4b"    # ~4 GB — fast, great for HA voice assistant
-  "qwen3:14b"   # ~10 GB — higher quality reasoning
+  "qwen3:14b"   # ~10 GB — primary model; good balance of speed and capability on 48 GB RAM
 )
 
 # =============================================================================

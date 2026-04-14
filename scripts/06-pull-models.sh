@@ -14,8 +14,7 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 # --- Models to pull ----------------------------------------------------------
 # Comment/uncomment or add models. Sizes are approximate compressed download sizes.
 MODELS=(
-  "qwen3:4b"          # ~2.6 GB  — fast, great for HA voice assistant (recommended start)
-  "qwen3:14b"         # ~8.2 GB  — better reasoning, still runs well on 48 GB RAM
+  "qwen3:14b"         # ~8.2 GB  — primary model; good balance of speed and capability on 48 GB RAM
   # "llama3.1:8b"     # ~4.7 GB  — Meta's general-purpose model
   # "qwen3:30b-a3b"   # ~17 GB   — MoE model, near GPT-4 quality, efficient
   # "llama3.1:70b"    # ~40 GB   — maximum capability, slow on CPU-only
@@ -57,7 +56,7 @@ fi
 
 echo ""
 echo "Test a model interactively:"
-echo "  docker exec -it ollama ollama run qwen3:4b"
+echo "  docker exec -it ollama ollama run qwen3:14b"
 echo ""
 echo "Remove a model to free disk space:"
 echo "  docker exec ollama ollama rm <model-name>"
