@@ -36,10 +36,11 @@ services:
       - "3000:8080"
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
-      # Sets qwen3:14b as the default model in Open WebUI for chat and MCP agent workflows.
+      # Sets qwen3:30b-a3b as the default model in Open WebUI for chat and MCP agent workflows.
       # The voice pipeline in Home Assistant independently uses qwen3:4b (configured in HA UI).
-      # Both models are loaded by Ollama and sit in memory simultaneously.
-      - DEFAULT_MODELS=qwen3:14b
+      # qwen3:14b is also available as an optional middle ground if 30b-a3b feels slow.
+      # Ollama lazy-loads models on demand — all three together ceiling ~34 GB of 48 GB.
+      - DEFAULT_MODELS=qwen3:30b-a3b
       # Optional: set a secret key for session security
       # - WEBUI_SECRET_KEY=change-me-to-a-random-string
     volumes:

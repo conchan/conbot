@@ -9,7 +9,7 @@
 #   - Installs Docker + Docker Compose plugin
 #   - Creates ~/ai-stack/docker-compose.yml
 #   - Starts Ollama + Open WebUI containers
-#   - Pulls both models: qwen3:4b (voice) and qwen3:14b (chat/MCP)
+#   - Pulls three models: qwen3:4b (voice), qwen3:30b-a3b (chat/MCP), qwen3:14b (optional middle ground)
 # =============================================================================
 set -euo pipefail
 
@@ -26,13 +26,16 @@ AI_STACK_DIR="${HOME}/ai-stack"
 OLLAMA_PORT=11434
 WEBUI_PORT=3000
 
-# Both models are pulled so they sit in memory simultaneously.
-#   qwen3:4b  → HA voice pipeline (fast response, handles device commands perfectly)
-#   qwen3:14b → Open WebUI chat + MCP agent workflows (higher quality for deliberate tasks)
-# Both fit comfortably within the 48 GB RAM allocation with headroom to spare.
+# All three models are pulled. Ollama lazy-loads on demand — they don't all sit in
+# memory simultaneously unless actively used. Combined ceiling ~34 GB, well within
+# the 48 GB container allocation.
+#   qwen3:4b       → HA voice pipeline (fast response, handles device commands perfectly)
+#   qwen3:30b-a3b  → Open WebUI chat + MCP agent workflows (best quality-to-speed ratio)
+#   qwen3:14b      → Optional middle ground if 30b-a3b feels slow for some tasks
 MODELS_TO_PULL=(
-  "qwen3:4b"    # ~2.6 GB — voice assistant model
-  "qwen3:14b"   # ~8.2 GB — chat / MCP agent model
+  "qwen3:4b"        # ~4 GB  — voice assistant model (HA Assist / voice pipeline)
+  "qwen3:30b-a3b"   # ~20 GB — chat / MCP agent model (best quality-to-speed ratio)
+  "qwen3:14b"       # ~10 GB — optional middle ground if 30b-a3b feels slow
 )
 
 # =============================================================================
@@ -120,7 +123,7 @@ services:
       - "${WEBUI_PORT}:8080"
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
-      - DEFAULT_MODELS=qwen3:14b
+      - DEFAULT_MODELS=qwen3:30b-a3b
     volumes:
       - open_webui_data:/app/backend/data
     depends_on:

@@ -201,7 +201,7 @@ In Proxmox UI → **Datacenter → Node → Create CT**:
 | Hostname | `ai-stack` |
 | Password | Set a strong root password |
 | Template | `ubuntu-24.04-standard_24.04-2_amd64.tar.zst` |
-| Disk | `200 GB` (models are large — one 14B model is ~9–10 GB) |
+| Disk | `200 GB` (models are large — the 30B-A3B model alone is ~20 GB) |
 | CPU | `10–12 cores` |
 | RAM | `48000 MB` (48 GB) |
 | Network | DHCP |
@@ -270,27 +270,31 @@ docker compose up -d
 Open WebUI is now accessible at `http://192.168.1.101:3000`. The first account you create is the admin.
 
 ### Step 4 — Pull your AI models
-> **Script available:** `scripts/04-pull-models.sh` — pulls both models by default. Run it inside CT 101's shell.
+> **Script available:** `scripts/04-pull-models.sh` — pulls all three models by default. Run it inside CT 101's shell.
 
 Or manually:
 ```bash
 # Voice assistant model (used by HA Assist / voice pipeline)
 docker exec -it ollama ollama pull qwen3:4b
 
-# Chat + MCP agent model (used by Open WebUI)
+# Primary chat + MCP agent model (used by Open WebUI)
+docker exec -it ollama ollama pull qwen3:30b-a3b
+
+# Optional middle ground — pull this if 30b-a3b feels slow for some tasks
 docker exec -it ollama ollama pull qwen3:14b
 ```
 
-Both models sit in memory simultaneously. Combined they use ~11 GB of your 48 GB allocation — well within headroom. There's no manual switching needed: HA's voice pipeline is wired to `qwen3:4b` and Open WebUI defaults to `qwen3:14b` automatically.
+Ollama lazy-loads models on demand — all three don't sit in memory simultaneously unless you're actively using them at the same time. Combined ceiling is ~34 GB of your 48 GB allocation. No manual switching needed: HA's voice pipeline is wired to `qwen3:4b` and Open WebUI defaults to `qwen3:30b-a3b` automatically.
 
 **Model reference for your 48 GB container:**
 
 | Model | RAM Used | Speed | Role in this setup |
 |-------|----------|-------|--------------------|
 | `qwen3:4b` | ~4 GB | Fast | **HA voice pipeline** — fast enough for voice, handles device commands perfectly |
-| `qwen3:14b` | ~10 GB | Medium | **Open WebUI + MCP agents** — better quality for deliberate tasks |
-| `qwen3:30b-a3b` (MoE) | ~20 GB | Medium | Optional: near-GPT-4 quality if you want to experiment |
-| `llama3.1:70b` (Q4) | ~40 GB | Slow | Optional: maximum capability, leaves little headroom |
+| `qwen3:30b-a3b` (MoE) | ~20 GB | Medium | **Open WebUI + MCP agents** — best quality-to-speed ratio, primary chat model |
+| `qwen3:14b` | ~10 GB | Medium | **Optional middle ground** — pull this if 30b-a3b feels slow for some tasks |
+
+All three together use ~34 GB — well within the 48 GB container budget. Ollama lazy-loads on demand so they don’t all occupy RAM simultaneously unless actively in use.
 
 ### Step 5 — Assign a static IP to the AI container
 In your **router's admin panel**, assign a static DHCP lease for `ai-stack` (e.g., `192.168.1.101`).
@@ -337,7 +341,7 @@ Press `e` in Home Assistant to open Assist. Switch the conversation agent dropdo
 > - **Ask for config values** — e.g. "what's the correct ZHA path for a Sonoff Zigbee dongle on a Proxmox USB passthrough?"
 > - **Interpret commissioning errors** — Matter errors are often cryptic; paste them and ask
 >
-> Open a browser tab with Open WebUI alongside your HA tab. The `qwen3:14b` model running locally is the equivalent of having a knowledgeable assistant sitting next to you during setup — and nothing you type leaves your network.
+> Open a browser tab with Open WebUI alongside your HA tab. The `qwen3:30b-a3b` model running locally is the equivalent of having a knowledgeable assistant sitting next to you during setup — and nothing you type leaves your network.
 
 ---
 
@@ -417,7 +421,7 @@ Proxmox UI → HAOS VM → **Reboot**
 
 ## Part 7 — Matter & Thread (Apple TV 4K as Border Router)
 
-> **This part is intentionally placed here** — after the AI stack (Parts 3–5) is running. Matter commissioning has more moving parts than Zigbee (IPv6, multicast, Thread credentials, multi-fabric), and errors often show up as silent failures. Having Open WebUI running with `qwen3:14b` means you can paste your HA logs or describe what you're seeing and get actionable help without leaving your desk. See the [Recommended Setup Order](#recommended-setup-order) table above.
+> **This part is intentionally placed here** — after the AI stack (Parts 3–5) is running. Matter commissioning has more moving parts than Zigbee (IPv6, multicast, Thread credentials, multi-fabric), and errors often show up as silent failures. Having Open WebUI running with `qwen3:30b-a3b` means you can paste your HA logs or describe what you're seeing and get actionable help without leaving your desk. See the [Recommended Setup Order](#recommended-setup-order) table above.
 
 ### Background: Thread vs. Matter vs. Zigbee
 
@@ -796,7 +800,7 @@ Before building the Shortcut, confirm these are already in place:
 1. In HA → hamburger menu → **Developer Tools** → **States**
 2. Filter by `conversation`
 3. Find an entity like `conversation.ollama_qwen3_4b` — copy the full entity ID
-   (The voice pipeline uses `qwen3:4b`; Open WebUI uses `qwen3:14b` separately)
+   (The voice pipeline uses `qwen3:4b`; Open WebUI uses `qwen3:30b-a3b` separately)
 
 ### Step 2 — Find your Piper voice ID
 1. **Settings → Add-ons → Piper** → note the voice name you configured (e.g., `en_US-lessac-medium`)
@@ -937,7 +941,8 @@ Work through this in order. The sequence follows the [Recommended Setup Order](#
 ### Step 4 — Part 4: Wire Ollama to HA
 - [ ] Add Ollama integration in HA → URL: `http://192.168.1.101:11434`
 - [ ] Create conversation agent with `qwen3:4b` (voice model)
-- [ ] Confirm Open WebUI defaults to `qwen3:14b` (set via `DEFAULT_MODELS` env var in docker-compose)
+- [ ] Confirm Open WebUI defaults to `qwen3:30b-a3b` (set via `DEFAULT_MODELS` env var in docker-compose)
+- [ ] Optionally pull `qwen3:14b` as a middle-ground alternative (`docker exec -it ollama ollama pull qwen3:14b`)
 - [ ] Expose entities → test via Assist (`e` key in HA)
 - [ ] **AI assistant is now available** — open `http://192.168.1.101:3000` alongside HA for the steps below
 
