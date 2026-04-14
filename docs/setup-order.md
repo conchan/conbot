@@ -17,6 +17,7 @@
 │  │   64 GB disk         │  │  200 GB disk             │ │
 │  └──────────────────────┘  └──────────────────────────┘ │
 │       USB passthrough: Sonoff Zigbee dongle              │
+│       Thread border router: Apple TV 4K (on LAN)         │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -35,9 +36,11 @@
 ## Before You Start
 
 ### Buy these before Day 1
-- **Sonoff Zigbee 3.0 USB Dongle Plus-E** (~$20) — replaces the Yellow's built-in radio
+- **Sonoff Zigbee 3.0 USB Dongle Plus-E** (~$20) — replaces the Yellow's built-in Zigbee radio
 - **USB flash drive** (8 GB+) — for the Proxmox installer
 - **Ethernet cable** — wire the Minisforum directly to your router
+
+> **You already have what you need for Matter/Thread.** Your Apple TV 4K (2nd gen or 3rd gen Wi-Fi + Ethernet model) acts as the Thread border router — no additional hardware required. See Part 3.5 for the full setup.
 
 ### Back up HA Yellow first
 Do this before touching anything else. Keep the Yellow running in parallel until the new setup is confirmed stable.
@@ -175,7 +178,165 @@ Proxmox UI → HAOS VM → **Reboot**
    - ZHA: Settings → Add Integration → "Zigbee Home Automation" → select dongle path (usually `/dev/ttyUSB0` or `/dev/serial/by-id/...`)
 3. Zigbee devices should reconnect within minutes — if any don't reconnect overnight, power-cycle them
 
-> **Thread/Matter note:** The Yellow's built-in Thread radio doesn't transfer to USB. If you use Thread/Matter devices, you'll need a separate Thread border router (e.g., HomePod Mini, Apple TV 4K, or SLZB-06M Ethernet adapter). Most Zigbee setups are unaffected.
+> **Thread/Matter:** The Yellow's built-in Thread radio does not transfer to USB. Your Apple TV 4K is already acting as a Thread border router on your network — no USB radio needed. **Proceed to Part 3.5** to connect your Matter devices to Home Assistant via the Apple TV.
+
+---
+
+## Part 3.5 — Matter & Thread (Apple TV 4K as Border Router)
+
+### Background: Thread vs. Matter vs. Zigbee
+
+These three terms often get conflated. Here's what each one actually is:
+
+| Protocol | What it is | Analogy |
+|----------|-----------|--------|
+| **Zigbee** | A radio protocol for low-power devices | Like Wi-Fi, but for sensors and switches |
+| **Thread** | A radio/mesh networking protocol | Like Wi-Fi, but for Matter devices |
+| **Matter** | A smart home control standard | The language devices speak — can run over Wi-Fi or Thread |
+
+Your Apple TV 4K is a **Thread border router** — it bridges your Thread radio mesh to your regular IP network so Home Assistant (and other controllers) can talk to Thread-based Matter devices. The Apple TV handles the radio; HA handles the control.
+
+Critically: your Zigbee setup (via the Sonoff dongle from Part 3) and your Matter/Thread setup are completely independent. One doesn't affect the other.
+
+### Apple TV 4K model check — Thread support
+
+Not all Apple TV 4K models support Thread. Before proceeding:
+
+| Model | Thread? |
+|-------|---------|
+| Apple TV 4K 3rd gen (2022) — **Wi-Fi + Ethernet** | ✓ Yes |
+| Apple TV 4K 3rd gen (2022) — **Wi-Fi only (64 GB)** | ✗ No |
+| Apple TV 4K 2nd gen (2021) | ✓ Yes |
+| Apple TV 4K 1st gen (2017) | ✗ No |
+
+To confirm: **Apple TV → Settings → General → About → Model**
+
+If your Apple TV does not support Thread, you can still add Matter-over-Wi-Fi devices directly — you just can't use Thread-based devices. For a Thread-capable radio without the Apple TV, a HomePod Mini or HomePod 2nd gen also works as a border router.
+
+> **Script available:** `scripts/07-matter-prereq-check.sh` — run this in the Proxmox Shell before continuing. It verifies that IPv6 is enabled, multicast traffic is not being blocked on the Proxmox bridge, and the HA VM is reachable. Matter silently fails without these conditions.
+
+To run the script, copy it from the repo to the Proxmox host:
+
+```bash
+# In the Proxmox Shell — download and run the prerequisite check
+curl -fsSL https://raw.githubusercontent.com/conchan/ha-local-ai-setup/main/scripts/07-matter-prereq-check.sh | bash
+```
+
+> Since the repo is private, you can alternatively copy-paste the script contents directly from the GitHub file view into the Proxmox Shell, or `scp` it from your Mac.
+
+Fix any failures the script reports before continuing.
+
+### Step 1 — Confirm IPv6 and multicast on the Proxmox bridge
+
+The script checks this automatically. If it flagged multicast snooping as enabled, fix it now — this is the most common reason Matter devices fail to commission:
+
+```bash
+# Disable multicast snooping immediately (no reboot needed)
+echo 0 > /sys/class/net/vmbr0/bridge/multicast_snooping
+
+# Make it permanent — add this line to /etc/network/interfaces
+# under the 'iface vmbr0 inet static' block:
+#   bridge-multicast-snooping 0
+```
+
+Also confirm IPv6 is not disabled:
+```bash
+sysctl net.ipv6.conf.all.disable_ipv6
+# Should return: net.ipv6.conf.all.disable_ipv6 = 0
+# If it returns 1, run:
+sysctl -w net.ipv6.conf.all.disable_ipv6=0
+echo 'net.ipv6.conf.all.disable_ipv6=0' >> /etc/sysctl.conf
+```
+
+### Step 2 — Confirm your Apple TV is signed into Apple Home
+
+The Apple TV needs to be set up as a Home hub before it can route Thread traffic:
+
+1. On your iPhone → **Home app** → tap the **house icon** (top left) → **Home Settings**
+2. Scroll down to your Apple TV — it should show **"Connected"** as a home hub
+3. If it shows "Not Responding" or isn't listed, open **Settings on the Apple TV → Users and Accounts** and sign in with your Apple ID
+
+### Step 3 — Install the Matter integration in Home Assistant
+
+In Home Assistant:
+1. **Settings → Devices & Services → Add Integration**
+2. Search for **"Matter"** → select it
+3. When prompted: **"Select the connection method"** → leave the checkbox checked → **Submit**
+   - This installs the official Matter Server app automatically on HAOS
+4. Wait for the Matter Server app to start (~1 minute)
+5. The Matter integration card appears in Devices & Services — it's ready
+
+> No manual configuration needed. HAOS handles the Matter Server installation automatically.
+
+### Step 4 — Share Apple's Thread credentials with Home Assistant
+
+For HA to communicate with your Thread-based Matter devices over the Apple TV's network, HA needs the Thread network credentials. You transfer these from your iPhone:
+
+1. Install the **Home Assistant Companion app** on your iPhone (if not already)
+2. Open the Companion app → **Settings → Devices & Services**
+3. Tap the **Thread** integration → **Configure**
+4. You should see your Apple Thread network listed (named something like `MyHome1234`)
+5. Tap **"Send credentials to Home Assistant"** → tap **Allow** when iOS asks for permission
+6. Back in the HA web UI → **Settings → Devices & Services → Thread** → you should see the Apple network listed as a known Thread network
+7. Tap **Configure** → tap **"Make preferred network"** on the Apple network
+
+> If the Apple network doesn't appear, make sure your iPhone is:
+> - Logged in with the **same Apple ID** as the Apple TV
+> - Connected to the **same Wi-Fi network** as your Apple TV and Home Assistant
+> - Running the HA Companion app with **Location permission set to "Always"** (required for Thread credential transfer)
+
+### Step 5 — Add Matter devices to Home Assistant
+
+There are two methods. Use whichever fits your situation:
+
+#### Method A — Add a new device directly to HA (recommended for new devices)
+
+Use this when the Matter device hasn't been paired to anything yet:
+
+1. Open the **Home Assistant Companion app** on your iPhone
+2. Tap **...** (top right) → **Add to Home Assistant** → **Add device** → **Add Matter device**
+3. Tap **"No, it's new"**
+4. Scan the QR code on the device (or tap **"More options"** to enter the numeric code)
+5. HA commissions the device — takes 1–3 minutes
+6. The device appears in HA under its entity name
+
+Your Apple TV bridges the Thread signal. HA is the controller — the device lives on the HA fabric.
+
+#### Method B — Share a device already in Apple Home to HA (for existing Apple Home devices)
+
+Use this when the device is already paired to Apple Home and you want to add HA as a second controller without factory-resetting it:
+
+1. Open the **Apple Home app** on your iPhone
+2. Tap and hold the device → **Settings** (gear icon) → scroll down → **Turn On Pairing Mode**
+   - This generates a one-time share code
+   - Alternative on some devices: tap the device → gear icon → **Share Access** → the code appears
+3. Copy the code or note the numeric string
+4. Open the **HA Companion app** → **...** → **Add to Home Assistant** → **Add device** → **Add Matter device**
+5. Tap **"Yes, it's already in use"** → select **Apple Home**
+6. Enter the share code when prompted
+7. HA is now a second controller — you can control the device from both Apple Home and HA simultaneously
+
+Matter's multi-fabric feature means both controllers see live state updates — there's no sync delay.
+
+#### Which method should I use?
+
+| Situation | Method |
+|-----------|--------|
+| Brand new device, not yet paired anywhere | A |
+| Device already in Apple Home, want to keep it there too | B |
+| Device already in Apple Home, want HA only | Factory reset → A |
+
+### Step 6 — Verify the device in Home Assistant
+
+1. **Settings → Devices & Services** → find your new Matter device
+2. Click the device → confirm you can toggle it on/off from HA
+3. Check that state changes in Apple Home are reflected in HA (and vice versa) — this confirms the multi-fabric setup is working
+
+### Known limitations with Apple Thread border routers
+
+- **OTA firmware updates for Matter devices do not work** through Apple border routers. The Apple TV doesn't forward the mDNS packets HA needs to push updates. If you want to run Matter OTA updates from HA, you'd need an additional non-Apple Thread border router (e.g., an SLZB-06M or Home Assistant Connect ZBT-1 configured for Thread). Updates can still be pushed from the Apple Home app.
+- **Keep Apple TV and Home Assistant on the same flat network** (same VLAN/subnet). If you have VLANs, mDNS won't cross them without a reflector, and Matter commissioning will silently fail.
+- **Thread 1.4** (which would unify multi-brand Thread networks automatically) is coming to Apple TV via tvOS 26 — expected fall 2026. For now, your Apple Thread network and any future HA-native Thread network are separate.
 
 ---
 
@@ -730,6 +891,18 @@ Use this to track your progress. Work through it top to bottom.
 - [ ] Reboot HAOS VM
 - [ ] Configure ZHA or Zigbee2MQTT in HA → confirm devices reconnect
 
+### Part 3.5 — Matter & Thread
+- [ ] Confirm Apple TV 4K model supports Thread (Settings → General → About → Model)
+- [ ] Confirm Apple TV is connected as a home hub in the iPhone Home app
+- [ ] Run `scripts/07-matter-prereq-check.sh` in Proxmox Shell → fix any failures
+- [ ] Disable multicast snooping on `vmbr0` if flagged by script
+- [ ] Confirm IPv6 enabled on Proxmox host if flagged by script
+- [ ] Install Matter integration in HA (Settings → Integrations → Add → Matter)
+- [ ] Transfer Apple Thread credentials to HA via iPhone Companion app
+- [ ] Set Apple Thread network as preferred in HA Thread integration
+- [ ] Add each Matter device using Method A (new) or Method B (already in Apple Home)
+- [ ] Verify device control works from both HA and Apple Home
+
 ### Part 4 — AI Stack
 - [ ] Run `scripts/02-download-ubuntu-template.sh` in Proxmox Shell
 - [ ] Create LXC CT 101 (`ai-stack`): 10–12 cores, 48 GB RAM, 200 GB disk, Nesting enabled
@@ -794,3 +967,4 @@ Allocations can be adjusted in Proxmox at any time without reinstalling anything
 | `scripts/04-tailscale-proxmox.sh` | Proxmox Shell | Part 8, Option A Steps 2–3 |
 | `scripts/05-wireguard-lxc-harden.sh` | Inside WireGuard LXC shell | Part 8, Option B Steps 3–4 |
 | `scripts/06-pull-models.sh` | Inside CT 101 shell | Part 4, Step 4 (model management) |
+| `scripts/07-matter-prereq-check.sh` | Proxmox Shell | Part 3.5, pre-flight check |
