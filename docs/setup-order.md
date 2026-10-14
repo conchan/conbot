@@ -575,7 +575,7 @@ Matter's multi-fabric feature means both controllers see live state updates — 
 
 - **OTA firmware updates for Matter devices do not work** through Apple border routers. The Apple TV doesn't forward the mDNS packets HA needs to push updates. If you want to run Matter OTA updates from HA, you'd need an additional non-Apple Thread border router (e.g., an SLZB-06M or Home Assistant Connect ZBT-1 configured for Thread). Updates can still be pushed from the Apple Home app.
 - **Keep Apple TV and Home Assistant on the same flat network** (same VLAN/subnet). If you have VLANs, mDNS won't cross them without a reflector, and Matter commissioning will silently fail.
-- **Thread 1.4** (which would unify multi-brand Thread networks automatically) is coming to Apple TV via tvOS 26 — expected fall 2026. For now, your Apple Thread network and any future HA-native Thread network are separate.
+- **Thread 1.4** (which would unify multi-brand Thread networks automatically) was expected on Apple TV with tvOS 26 in fall 2026 (as of April 2026; check current status). For now, your Apple Thread network and any future HA-native Thread network are separate.
 
 ---
 

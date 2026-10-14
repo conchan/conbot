@@ -1,5 +1,7 @@
 # Home Assistant + Local AI — Setup Scripts
 
+> **Status:** a snapshot of how I moved my smart home and AI models onto one self-hosted box in April 2026. It's the foundation of my personal home lab (I call the whole setup *conbot*), which has grown since to include an agent, document archiving and image generation that this guide doesn't cover yet. Shared as-is, as a reference for anyone building something similar. Read each script before you run it.
+
 Automation scripts for setting up a self-hosted Home Assistant + Ollama AI stack on the **Minisforum AI X1 Pro-370** running Proxmox VE.
 
 > These scripts automate the shell-side steps from the setup guide. Steps that require BIOS interaction, Proxmox UI clicks, router configuration, or HA UI are documented as manual steps in [`docs/setup-order.md`](docs/setup-order.md).
@@ -52,30 +54,29 @@ Automation scripts for setting up a self-hosted Home Assistant + Ollama AI stack
 
 ```bash
 # 1. In Proxmox Shell — immediately after first boot:
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/01-proxmox-post-install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/conchan/ha-local-ai-setup/main/scripts/01-proxmox-post-install.sh)
 # Then reboot
 
 # 2. In Proxmox Shell — download Ubuntu template for LXC:
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/02-download-ubuntu-template.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/conchan/ha-local-ai-setup/main/scripts/02-download-ubuntu-template.sh)
 # Then create CT 101 (ai-stack) in the Proxmox UI — see docs/setup-order.md
 
 # 3. Inside CT 101 Shell — set up Docker + Ollama + Open WebUI:
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/03-setup-ai-stack.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/conchan/ha-local-ai-setup/main/scripts/03-setup-ai-stack.sh)
 
 # 4. Later — pull or update Ollama models as needed:
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/04-pull-models.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/conchan/ha-local-ai-setup/main/scripts/04-pull-models.sh)
 
 # 5a. In Proxmox Shell — set up Tailscale VPN (recommended):
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/05-tailscale-proxmox.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/conchan/ha-local-ai-setup/main/scripts/05-tailscale-proxmox.sh)
 
 # 5b. Inside WireGuard LXC Shell — harden WireGuard (alternative to Tailscale):
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/06-wireguard-lxc-harden.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/conchan/ha-local-ai-setup/main/scripts/06-wireguard-lxc-harden.sh)
 
 # 7. In Proxmox Shell — run Matter/Thread preflight check before Part 7:
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/ha-local-ai-setup/main/scripts/07-matter-prereq-check.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/conchan/ha-local-ai-setup/main/scripts/07-matter-prereq-check.sh)
 ```
 
-Replace `YOUR_USERNAME` with your GitHub username after pushing this repo.
 
 ## What Can't Be Automated
 
