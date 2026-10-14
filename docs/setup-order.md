@@ -458,7 +458,7 @@ To run the script, copy it from the repo to the Proxmox host:
 
 ```bash
 # In the Proxmox Shell — download and run the prerequisite check
-curl -fsSL https://raw.githubusercontent.com/conchan/ha-local-ai-setup/main/scripts/07-matter-prereq-check.sh | bash
+curl -fsSL https://raw.githubusercontent.com/conchan/conbot/main/scripts/07-matter-prereq-check.sh | bash
 ```
 
 > Since the repo is private, you can alternatively copy-paste the script contents directly from the GitHub file view into the Proxmox Shell, or `scp` it from your Mac.
